@@ -6,8 +6,6 @@ Put a bar at the top, bottom, or both edges of the screen. Arrange widgets on th
 
 The bundle includes thirteen optional widgets: **Ammo, Currency, Durability, Eyes, Location, Mail, Network, Performance, Reputation, Social, Time, Volume and XP**. Enable the widget addons you want, then configure their displays in Menubar's settings. Layouts and widget preferences are saved per character; appearance profiles are shared across your characters.
 
-This is a preview build.
-
 ## Getting started
 
 1. Extract the provided Menubar ZIP into your Forever client's `Interface/AddOns` folder. The `Menubar` and `Menubar_*` folders should sit directly inside it.
@@ -18,13 +16,9 @@ Use the widget list to add, remove, arrange and configure your displays. When up
 
 ## Controls
 
-- Hover over a widget for information and click hints.
-- Left-click the Menubar icon to open its menu. Other widgets offer shortcuts and quick controls where available.
+- Hover over a widget for information.
 - Right-click a widget to open its settings.
 - Shift-left-click a widget for its contextual menu.
-- Scroll over Volume to adjust the game's master volume.
-
-The XP, Reputation and Durability widgets hide Blizzard's corresponding bars and warnings by default. Their settings let you restore those displays. XP and Reputation gauges follow the bar theme unless you choose an explicit gauge style.
 
 ## Reporting issues
 
