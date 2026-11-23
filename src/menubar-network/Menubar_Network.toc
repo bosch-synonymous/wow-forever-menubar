@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Network
+## Notes: Game-reported latency and traffic for Menubar.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.6.6
+## Dependencies: Menubar
+
+Network.lua

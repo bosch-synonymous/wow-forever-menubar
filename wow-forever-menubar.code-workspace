@@ -1,0 +1,75 @@
+{
+	"folders": [
+		{
+			"name": "menubar-core",
+			"path": "src/menubar-core"
+		},
+		{
+			"name": "tests",
+			"path": "tests"
+		},
+		{
+			"name": "tools",
+			"path": "tools"
+		},
+		{
+			"name": "scratch",
+			"path": "scratch"
+		},
+		{
+			"name": "menubar-ammo",
+			"path": "src/menubar-ammo"
+		},
+		{
+			"name": "menubar-currency",
+			"path": "src/menubar-currency"
+		},
+		{
+			"name": "menubar-durability",
+			"path": "src/menubar-durability"
+		},
+		{
+			"name": "menubar-eyes",
+			"path": "src/menubar-eyes"
+		},
+		{
+			"name": "menubar-location",
+			"path": "src/menubar-location"
+		},
+		{
+			"name": "menubar-mail",
+			"path": "src/menubar-mail"
+		},
+		{
+			"name": "menubar-network",
+			"path": "src/menubar-network"
+		},
+		{
+			"name": "menubar-performance",
+			"path": "src/menubar-performance"
+		},
+		{
+			"name": "menubar-reputation",
+			"path": "src/menubar-reputation"
+		},
+		{
+			"name": "menubar-social",
+			"path": "src/menubar-social"
+		},
+		{
+			"name": "menubar-time",
+			"path": "src/menubar-time"
+		},
+		{
+			"name": "menubar-volume",
+			"path": "src/menubar-volume"
+		},
+		{
+			"name": "menubar-xp",
+			"path": "src/menubar-xp"
+		}
+	],
+	"settings": {
+		"powershell.cwd": "menubar-core"
+	}
+}

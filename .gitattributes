@@ -1,0 +1,6 @@
+# Keep source and packages reproducible across Windows and other build hosts.
+* text=auto eol=lf
+
+# Original runtime artwork must retain its exact bytes.
+*.tga -text
+*.png -text

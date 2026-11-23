@@ -1,0 +1,20 @@
+## Interface: 16001
+## Title: Menubar
+## Notes: A configurable Macintosh and Warcraft inspired menu bar and independent widget host for WoW: Forever.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## AddonCompartmentFunc: Menubar_OnAddonCompartmentClick
+## Version: 0.11.30
+## SavedVariables: MenubarDB
+
+Model.lua
+Identity.lua
+Fonts.lua
+Layout.lua
+Gauge.lua
+Skins.lua
+NativeStatusBars.lua
+Core.lua
+UI.lua
+Settings.lua

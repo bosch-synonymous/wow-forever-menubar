@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Performance
+## Notes: Frame rate, addon Lua memory and optional project-addon diagnostics for Menubar.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.8.10
+## Dependencies: Menubar
+
+Performance.lua

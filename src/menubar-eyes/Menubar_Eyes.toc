@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Eyes
+## Notes: Original cursor-following eyes with pixel and smooth shaded styles for Menubar.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.6.7
+## Dependencies: Menubar
+
+Eyes.lua

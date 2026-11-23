@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Volume
+## Notes: Game master-volume control for Menubar.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.6.9
+## Dependencies: Menubar
+
+Volume.lua

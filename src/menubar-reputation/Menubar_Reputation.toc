@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Reputation
+## Notes: Independent reputation instances for the Menubar host.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.6.8
+## Dependencies: Menubar
+
+Reputation.lua

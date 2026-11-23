@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Currency
+## Notes: Carried money widgets with selectable coin denominations for Menubar.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.6.17
+## Dependencies: Menubar
+
+Currency.lua

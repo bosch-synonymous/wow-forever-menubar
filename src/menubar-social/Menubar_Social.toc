@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Social
+## Notes: Social access and online friends in Menubar, with an optional hidden chat button.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.7.8
+## Dependencies: Menubar
+
+Social.lua

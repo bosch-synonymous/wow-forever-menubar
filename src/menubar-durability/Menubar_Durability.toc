@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Durability
+## Notes: Equipped durability averages and native slot alerts for WoW: Forever.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.1.10
+## Dependencies: Menubar
+
+Durability.lua

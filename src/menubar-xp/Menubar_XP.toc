@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: XP
+## Notes: Character level, experience and rested bonus widgets for Menubar.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.6.10
+## Dependencies: Menubar
+
+XP.lua

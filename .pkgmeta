@@ -1,0 +1,36 @@
+package-as: Menubar
+enable-nolib-creation: no
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - AGENTS.md
+  - guidance
+  - CONTRIBUTING.md
+  - wow-forever-menubar.code-workspace
+  - tests
+  - tools
+  - assets
+  - doc
+  - docs
+  - scratch
+  - build
+  - dist
+
+move-folders:
+  Menubar/src/menubar-core: Menubar
+  Menubar/src/menubar-ammo: Menubar_Ammo
+  Menubar/src/menubar-currency: Menubar_Currency
+  Menubar/src/menubar-durability: Menubar_Durability
+  Menubar/src/menubar-eyes: Menubar_Eyes
+  Menubar/src/menubar-location: Menubar_Location
+  Menubar/src/menubar-mail: Menubar_Mail
+  Menubar/src/menubar-network: Menubar_Network
+  Menubar/src/menubar-performance: Menubar_Performance
+  Menubar/src/menubar-reputation: Menubar_Reputation
+  Menubar/src/menubar-social: Menubar_Social
+  Menubar/src/menubar-time: Menubar_Time
+  Menubar/src/menubar-volume: Menubar_Volume
+  Menubar/src/menubar-xp: Menubar_XP

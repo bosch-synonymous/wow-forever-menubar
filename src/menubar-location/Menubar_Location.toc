@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: Menubar: Location
+## Notes: Zone, coordinates and territorial PvP classification for Menubar.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.6.8
+## Dependencies: Menubar
+
+TerritoryData.lua
+Location.lua

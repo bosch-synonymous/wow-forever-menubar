@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Ammo
+## Notes: Selected carried ammunition and an inventory summary for Menubar.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.6.7
+## Dependencies: Menubar
+
+Ammo.lua

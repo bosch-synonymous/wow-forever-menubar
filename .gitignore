@@ -1,0 +1,59 @@
+# Local research, captures, backups, downloaded tooling and build receipts
+/scratch/
+/.release/
+/dist/
+/build/
+
+# Game account data and local captures
+/WTF/
+/Screenshots/
+SavedVariables/
+
+# Python environments and generated caches
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Private local configuration and credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.git-credentials
+/.aws/
+/.ssh/
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Generated packages and temporary files
+*.zip
+*.bak
+*.tmp
+*.log
+*.orig
+*.rej
+
+# Local editor state; retain the shared portable workspace.
+*.code-workspace
+!/wow-forever-menubar.code-workspace
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

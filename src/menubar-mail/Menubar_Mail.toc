@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Menubar: Mail
+## Notes: Native mail notification and readable inbox counts for WoW: Forever.
+## Author: bosch-synonymous
+## X-License: MIT
+## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
+## Version: 0.1.8
+## Dependencies: Menubar
+
+Mail.lua
