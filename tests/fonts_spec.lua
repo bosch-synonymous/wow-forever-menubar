@@ -53,6 +53,24 @@ test("unknown currently selected paths remain selectable", function()
     equal(option(options, selected).group, "Game and custom fonts")
 end)
 
+test("bar and panel selections stay available without exposing private panel font objects", function()
+    local bar, panel = "Fonts\\Bar.ttf", "Fonts\\Panel.ttf"
+    MenubarPopupFont7 = { GetFont = function() return "Fonts\\InternalItalic.ttf" end }
+    GetFonts = function() return { "MenubarPopupFont7" } end
+    local options = Fonts.Options(nil, bar, panel)
+    assert(option(options, bar) and option(options, panel))
+    assert(not option(options, "Fonts\\InternalItalic.ttf"))
+end)
+
+test("a nil SetFont result requires the requested file and size to have taken effect", function()
+    local probe = { SetFont = function() end, GetFont = function() return "fonts/morpheus.ttf", 18 end }
+    assert(Fonts.TrySetFont(probe, "Fonts\\MORPHEUS.TTF", 18, ""))
+    assert(not Fonts.TrySetFont(probe, "Fonts\\Missing.ttf", 18, ""))
+    assert(not Fonts.TrySetFont(probe, "Fonts\\MORPHEUS.TTF", 17, ""))
+    probe.SetFont = function() return false end
+    assert(not Fonts.TrySetFont(probe, "Fonts\\MORPHEUS.TTF", 18, ""))
+end)
+
 test("custom persistence validates before mutating and trims names and files", function()
     local db = {}
     local result = assert(Fonts.AddCustom(db, "  Custom Family ", " Interface\\AddOns\\Fonts\\Regular.ttf ", {

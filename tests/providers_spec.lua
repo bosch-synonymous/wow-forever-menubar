@@ -552,12 +552,15 @@ check("owned map fallback follows capabilities after loader acceptance", functio
     equal(MenubarLocationDiagnostics().source, "clientData")
     equal(metadataQueries, 0)
     IsInInstance = function() return true, "party" end
-    Menubar.eventFrame.scripts.OnEvent(Menubar.eventFrame, "ZONE_CHANGED_NEW_AREA")
-    assert(value.text:find("[Unknown]", 1, true))
+    GetRealZoneText = function() return "Wailing Caverns" end
+    GetSubZoneText = function() return "" end
+    Menubar.eventFrame.scripts.OnEvent(Menubar.eventFrame, "PLAYER_ENTERING_WORLD")
+    equal(value.text, "Wailing Caverns [Dungeon]")
+    GetRealZoneText = function() return "The Barrens" end
     IsInInstance = function() return false, "none" end
     C_PvP.GetZonePVPInfo = function() return "sanctuary", false end
     Menubar.eventFrame.scripts.OnEvent(Menubar.eventFrame, "ZONE_CHANGED_NEW_AREA")
-    assert(value.text:find("[Sanctuary]", 1, true))
+    equal(value.text, "The Barrens (63.7, 38.9) [Sanctuary]")
     C_Map, GetRealZoneText, GetSubZoneText, GetBuildInfo = oldMap, oldZone, oldSubzone, oldBuild
     C_PvP.GetZonePVPInfo, GetZonePVPInfo, UnitFactionGroup = oldPvP, oldLegacy, oldFaction
     IsInInstance, UnitIsPVPFreeForAll, value.settings.colorStatus = oldInstance, oldFFA, oldColour

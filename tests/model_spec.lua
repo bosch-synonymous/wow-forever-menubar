@@ -22,7 +22,8 @@ check("fresh state has a shared profile and separate character layouts", functio
     equal(appearance.fontStyle, "regular")
     equal(appearance.fontFlags, "")
     equal(appearance.textShadow, true)
-    equal(appearance.opacity, 0.7)
+    equal(appearance.opacity, 0.90)
+    equal(appearance.popupOpacity, 0.90)
     equal(appearance.texture, "theme")
     equal(appearance.topLineSize, 1)
     equal(appearance.bottomLineSize, 4)
@@ -42,7 +43,8 @@ check("factory profiles are copied independently while saved appearance keeps le
     equal(second.profiles.Default.background[1], original)
     equal(Model.DefaultProfile.background[1], original)
     local copy = assert(Model.CreateProfile(first, "Factory"))
-    equal(copy.theme, "warcraftBrown"); equal(copy.opacity, 0.7)
+    equal(copy.theme, "warcraftBrown"); equal(copy.opacity, 0.90)
+    equal(copy.popupOpacity, 0.90); equal(copy.popupText.fontSize, 14)
     equal(copy.background[1], original)
     assert(copy.background ~= Model.DefaultProfile.background)
 
@@ -50,16 +52,139 @@ check("factory profiles are copied independently while saved appearance keeps le
     local _, _, legacy = Model.Initialize(saved, "A")
     equal(legacy.theme, "system7"); equal(legacy.font, "Fonts\\ARIALN.TTF")
     equal(legacy.opacity, 1); equal(legacy.texture, "solid")
+    equal(legacy.popupOpacity, 1)
     equal(legacy.background[1], 0.86); equal(legacy.textColor[1], 0)
     equal(legacy.roundedCorners, true); equal(legacy.textShadow, false)
     equal(legacy.bottomLineSize, 1); equal(legacy.custom, "preserved")
 end)
 
+check("every saved profile keeps its popup opacity across migration and subsequent reloads", function()
+    local saved = { profiles = {
+        Default = { theme = "macos27", opacity = 0.45 },
+        Linked = { opacity = 0.62, fullOpacityPopups = false },
+        Opaque = { opacity = 0.25, fullOpacityPopups = true },
+        Explicit = { opacity = 0.45, popupOpacity = 0, fullOpacityPopups = true },
+        Bounded = { opacity = 0.12, popupOpacity = 2 },
+        Low = { opacity = 0.88, popupOpacity = -0.3 },
+        Corrupt = { opacity = 0.5, popupOpacity = 0 / 0 },
+    } }
+    local db = Model.Initialize(saved, "A")
+    local expected = { Default = 0.45, Linked = 0.62, Opaque = 1,
+        Explicit = 0, Bounded = 1, Low = 0, Corrupt = 0.5 }
+    for name, alpha in pairs(expected) do
+        equal(db.profiles[name].popupOpacity, alpha)
+        equal(db.profiles[name].fullOpacityPopups, nil)
+    end
+    db.profiles.Default.opacity = 0.8
+    db.profiles.Opaque.popupOpacity = 0.67
+    Model.Initialize(db, "A")
+    equal(db.profiles.Default.popupOpacity, 0.45)
+    equal(db.profiles.Opaque.popupOpacity, 0.67)
+    equal(db.profiles.Opaque.opacity, 0.25)
+end)
+
+check("panel typography preserves native defaults and stores independent shared-profile choices", function()
+    local db, _, profile = Model.Initialize({ profiles = { Default = { fontSize = 19 } } }, "A")
+    local panel = profile.popupText
+    equal(panel.font, "theme"); equal(panel.fontSize, 0)
+    equal(panel.fontStyle, "regular"); equal(panel.useCustomColor, false)
+    equal(profile.fontSize, 19)
+    panel.font, panel.fontStyle, panel.fontSize = "Fonts\\Custom.ttf", "italic", 21
+    panel.useCustomColor, panel.textColor = true, { 0.14, 0.27, 0.51, 0.1 }
+    local copy = assert(Model.CreateProfile(db, "Reader", "Default"))
+    assert(copy.popupText ~= panel and copy.popupText.textColor ~= panel.textColor)
+    copy.popupText.textColor[1] = 0.72
+    assert(Model.ApplyTheme(profile, "macos27"))
+    equal(profile.popupText.font, "theme"); equal(profile.popupText.fontSize, 0)
+    Model.Initialize(db, "A")
+    assert(Model.ApplyTheme(profile, "system7"))
+    equal(profile.popupText.font, "Fonts\\Custom.ttf")
+    equal(profile.popupText.fontSize, 21); equal(profile.popupText.fontStyle, "italic")
+    equal(profile.popupText.textColor[1], 0.14); equal(profile.popupText.textColor[4], 1)
+    equal(copy.popupText.textColor[1], 0.72)
+    equal(Model.NormalizeProfile({ popupText = "invalid" }).popupText.font, "theme")
+end)
+
+check("bar and popup preferences return independently after theme switches, copying and reload", function()
+    local db, _, brown = Model.Initialize(nil, "A")
+    brown.font, brown.fontStyle, brown.fontSize = "Custom\\Bar.ttf", "bold", 14
+    brown.textShadow, brown.textColor = false, { 0.22, 0.36, 0.56, 0.75 }
+    brown.opacity, brown.popupOpacity = 0.32, 0.84
+    brown.popupText = { font = "Custom\\Panel.ttf", fontStyle = "italic", fontSize = 16,
+        useCustomColor = true, textColor = { 0.48, 0.41, 0.37, 1 } }
+    assert(Model.ApplyTheme(brown, "macos27"))
+    equal(brown.fontSize, 12); equal(brown.opacity, 0.45); equal(brown.popupOpacity, 0.90)
+    equal(brown.popupText.fontSize, 0); equal(brown.popupText.useCustomColor, false)
+    brown.opacity, brown.popupOpacity, brown.fontSize = 0, 1, 19
+    brown.textColor = { 0.79, 0.88, 0.99, 1 }
+    brown.popupText.fontSize = 21
+
+    local copy = assert(Model.CreateProfile(db, "Night", "Default"))
+    assert(Model.ApplyTheme(copy, "warcraftBrown"))
+    equal(copy.font, "Custom\\Bar.ttf"); equal(copy.fontStyle, "bold"); equal(copy.fontSize, 14)
+    equal(copy.textShadow, false); equal(copy.textColor[4], 0.75)
+    equal(copy.opacity, 0.32); equal(copy.popupOpacity, 0.84)
+    equal(copy.popupText.font, "Custom\\Panel.ttf"); equal(copy.popupText.fontStyle, "italic")
+    equal(copy.popupText.fontSize, 16); equal(copy.popupText.useCustomColor, true)
+    equal(copy.popupText.textColor[1], 0.48)
+    copy.popupText.textColor[1], copy.textColor[1] = 0.08, 0.09
+
+    local reloaded = Model.Initialize(Model.DeepCopy(db), "A")
+    local original = reloaded.profiles.Default
+    equal(original.theme, "macos27"); equal(original.fontSize, 19); equal(original.popupText.fontSize, 21)
+    equal(original.opacity, 0); equal(original.popupOpacity, 1)
+    assert(Model.ApplyTheme(original, "warcraftBrown"))
+    equal(original.popupText.textColor[1], 0.48); equal(original.textColor[1], 0.22)
+    equal(original.popupText.fontSize, 16); equal(original.opacity, 0.32)
+    assert(Model.ApplyTheme(original, "macos27"))
+    equal(original.textColor[2], 0.88); equal(original.popupText.fontSize, 21)
+    equal(original.fontSize, 19); equal(original.opacity, 0); equal(original.popupOpacity, 1)
+    equal(reloaded.profiles.Night.popupText.textColor[1], 0.08)
+    equal(Model.Themes.warcraftBrown.textColor[1], 1)
+end)
+
+check("a style can supply distinct first-use bar and popup defaults without sharing writable colours", function()
+    local _, _, profile = Model.Initialize(nil, "A")
+    local style = Model.DeepCopy(Model.Themes.macosx)
+    style.theme, style.fontSize, style.opacity, style.popupOpacity = "testAppearance", 14, 0.52, 0.93
+    style.popupText = { font = "Test.ttf", fontStyle = "italic", fontSize = 18,
+        useCustomColor = true, textColor = { 0.1, 0.2, 0.3, 1 } }
+    Model.Themes.testAppearance = style
+    assert(Model.ApplyTheme(profile, "testAppearance"))
+    equal(profile.fontSize, 14); equal(profile.opacity, 0.52); equal(profile.popupOpacity, 0.93)
+    equal(profile.popupText.font, "Test.ttf"); equal(profile.popupText.fontStyle, "italic")
+    equal(profile.popupText.fontSize, 18); equal(profile.popupText.textColor[2], 0.2)
+    profile.popupText.textColor[2] = 0.6
+    equal(style.popupText.textColor[2], 0.2)
+    assert(Model.ApplyTheme(profile, "warcraftBrown"))
+    assert(Model.ApplyTheme(profile, "testAppearance"))
+    equal(profile.popupText.textColor[2], 0.6)
+    Model.Themes.testAppearance = nil
+end)
+
+check("an upgraded Glass profile consumes its previous bar opacity once on first exit", function()
+    local _, _, profile = Model.Initialize({ profiles = { Default = {
+        theme = "macos27", fontSize = 15, opacity = 0.39, opacityBeforeGlass = 0.28,
+        popupOpacity = 0.81, popupText = { fontSize = 14 },
+    } } }, "A")
+    equal(profile.opacity, 0.39); equal(profile.popupOpacity, 0.81); equal(profile.popupText.fontSize, 14)
+    assert(Model.ApplyTheme(profile, "macosx"))
+    equal(profile.opacity, 0.28); equal(profile.popupOpacity, 0.90)
+    equal(profile.opacityBeforeGlass, nil)
+    assert(Model.ApplyTheme(profile, "macos27"))
+    equal(profile.opacity, 0.39); equal(profile.fontSize, 15); equal(profile.popupText.fontSize, 14)
+    assert(Model.ApplyTheme(profile, "system7"))
+    equal(profile.opacity, 0.7); equal(profile.popupText.fontSize, 0)
+end)
+
 check("a new character keeps an existing shared appearance and custom profiles", function()
     local db, character, profile = Model.Initialize(nil, "A")
     profile.theme, profile.opacity = "macos8", 0.35
+    profile.popupOpacity = 0.81
     profile.textColor = { 0.2, 0.3, 0.4, 1 }
     local custom = assert(Model.CreateProfile(db, "Night", "Default"))
+    equal(custom.popupOpacity, 0.81)
+    custom.popupOpacity = 0.29
     custom.font, custom.textShadow = "Custom\\Regular.ttf", false
     assert(Model.SetProfile(db, "A", "Night"))
     local instance = Model.AddWidget(db, "A", "time", { zone = "utc" }, { bar = "bottom", alignment = "center" })
@@ -70,6 +195,7 @@ check("a new character keeps an existing shared appearance and custom profiles",
     equal(profile.theme, "macos8"); equal(profile.opacity, 0.35)
     equal(profile.textColor, colors); equal(profile.textColor[2], 0.3)
     equal(db.profiles.Night, custom); equal(character.profile, "Night")
+    equal(profile.popupOpacity, 0.81); equal(custom.popupOpacity, 0.29)
     equal(custom.font, "Custom\\Regular.ttf"); equal(custom.textShadow, false)
     equal(character.widgets[1], instance); equal(instance.settings, settings)
     equal(instance.enabled, false); equal(instance.bar, "bottom"); equal(instance.alignment, "center")
@@ -284,7 +410,7 @@ check("separate rule sizes are bounded and chosen Platinum style survives reload
     equal(unknown.theme, "system7")
 end)
 
-check("changing bar style applies typography while preserving layout size opacity and widgets", function()
+check("a new bar style uses its own type and opacity while preserving layout and widget settings", function()
     local db, character, profile = Model.Initialize(nil, "A")
     local widget = Model.AddWidget(db, "A", "time", { zone = "utc" }, { bar = "bottom", alignment = "center" })
     profile.placement, profile.coreMenuBar = "both", "bottom"
@@ -295,15 +421,15 @@ check("changing bar style applies typography while preserving layout size opacit
     equal(profile.theme, "macos8")
     equal(profile.placement, "both"); equal(profile.coreMenuBar, "bottom")
     equal(profile.height, 42); equal(profile.padding, 17); equal(profile.spacing, 25)
-    equal(profile.font, "Fonts\\FRIZQT__.TTF"); equal(profile.fontStyle, "regular"); equal(profile.fontSize, 20)
-    equal(profile.opacity, 0.35); equal(profile.roundedCorners, true)
+    equal(profile.font, "Fonts\\FRIZQT__.TTF"); equal(profile.fontStyle, "regular"); equal(profile.fontSize, 12)
+    equal(profile.opacity, 0.7); equal(profile.roundedCorners, true)
     equal(character.widgets[1], widget)
     equal(widget.bar, "bottom"); equal(widget.alignment, "center"); equal(widget.settings.zone, "utc")
-    equal(profile.bottomLineSize, 2)
+    equal(profile.bottomLineSize, 1)
     assert(Model.ApplyTheme(profile, "system7"))
     equal(profile.bottomLineSize, 1)
     equal(profile.font, "Fonts\\FRIZQT__.TTF")
-    equal(profile.fontStyle, "regular"); equal(profile.opacity, 0.35)
+    equal(profile.fontStyle, "regular"); equal(profile.opacity, 0.7)
     equal(profile.textShadow, false)
 end)
 
@@ -312,8 +438,8 @@ check("theme values copy independently and an invalid theme leaves appearance in
     assert(Model.ApplyTheme(first, "macos8"))
     assert(Model.ApplyTheme(second, "macos8"))
     first.background[1] = 0.1
-    equal(second.background[1], 0.8)
-    equal(Model.Themes.macos8.background[1], 0.8)
+    equal(second.background[1], 0.87)
+    equal(Model.Themes.macos8.background[1], 0.87)
     local previousBackground = first.background
     assert(not Model.ApplyTheme(first, "missing"))
     equal(first.theme, "macos8")
@@ -385,10 +511,11 @@ check("legacy character hints cannot mutate a future saved schema", function()
     equal(saved.characters["First - Realm"], original); equal(saved.schemaVersion, 999)
 end)
 
-check("saved System 7 overrides survive until Mac OS 7.6 is explicitly selected and persist after reload", function()
+check("reapplying the current style refreshes its skin and retains its saved text and opacity through reload", function()
     local db, character, profile = Model.Initialize(nil, "A")
     profile.theme, profile.background, profile.texture = "system7", { 0.86, 0.86, 0.86, 1 }, "dither"
     profile.topLineSize, profile.bottomLineSize = 3, 2
+    profile.textColor, profile.textShadow = { 0.18, 0.27, 0.42, 1 }, true
     profile.font, profile.fontStyle, profile.fontSize = "Fonts\\MORPHEUS.TTF", "regular", 18
     profile.height, profile.opacity, profile.placement, profile.coreMenuBar = 32, 0.37, "both", "bottom"
     profile.padding, profile.spacing = 17, 22
@@ -400,10 +527,12 @@ check("saved System 7 overrides survive until Mac OS 7.6 is explicitly selected 
     assert(Model.ApplyTheme(profile, "system7"))
     equal(profile.theme, "system7"); equal(profile.texture, "solid")
     for index = 1, 4 do equal(profile.background[index], 1) end
-    for index = 1, 3 do equal(profile.textColor[index], 0); equal(profile.bottomLine[index], 0) end
+    for index, component in ipairs({ 0.18, 0.27, 0.42 }) do
+        equal(profile.textColor[index], component); equal(profile.bottomLine[index], 0)
+    end
     equal(profile.bottomLine[4], 1); equal(profile.topLineSize, 0); equal(profile.bottomLineSize, 1)
-    equal(profile.font, "Fonts\\FRIZQT__.TTF"); equal(profile.fontStyle, "regular")
-    equal(profile.textShadow, false); equal(profile.roundedCorners, true)
+    equal(profile.font, "Fonts\\MORPHEUS.TTF"); equal(profile.fontStyle, "regular")
+    equal(profile.textShadow, true); equal(profile.roundedCorners, true)
     equal(profile.height, 32); equal(profile.fontSize, 18); equal(profile.opacity, 0.37)
     equal(profile.placement, "both"); equal(profile.coreMenuBar, "bottom")
     equal(profile.padding, 17); equal(profile.spacing, 22)
@@ -412,7 +541,7 @@ check("saved System 7 overrides survive until Mac OS 7.6 is explicitly selected 
     local _, reloadedCharacter, reloaded = Model.Initialize(Model.DeepCopy(db), "A")
     equal(reloaded.theme, "system7"); equal(reloaded.texture, "solid"); equal(reloaded.background[1], 1)
     equal(reloaded.topLineSize, 0); equal(reloaded.bottomLineSize, 1)
-    equal(reloaded.font, "Fonts\\FRIZQT__.TTF"); equal(reloaded.fontSize, 18); equal(reloaded.opacity, 0.37)
+    equal(reloaded.font, "Fonts\\MORPHEUS.TTF"); equal(reloaded.fontSize, 18); equal(reloaded.opacity, 0.37)
     equal(reloadedCharacter.widgets[1].settings.zone, "utc"); equal(reloadedCharacter.widgets[1].enabled, false)
 end)
 

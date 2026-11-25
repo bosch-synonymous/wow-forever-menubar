@@ -10,6 +10,10 @@ local function number(value)
     return public(value) and type(value) == "number" and value == value and value > -math.huge and value < math.huge
 end
 
+local function formatPercent(value)
+    return string.format("%.0f%%", value)
+end
+
 local function colorValue(value)
     if not public(value) or type(value) ~= "table" then return nil end
     local color = {}
@@ -87,6 +91,7 @@ end
 local function controlSession(ui, control)
     local generation, token, window = ui.settingsGeneration, control.menubarSession, ui.window
     local database, character, profile = Host.db, Host.characterKey, Host:GetProfile()
+    local theme = profile and profile.theme
     local id, draft = ui.widgetID, ui.fontEditor
     local instance = id and Model.GetWidget(database, character, id)
     local settings = instance and instance.settings
@@ -96,6 +101,7 @@ local function controlSession(ui, control)
             or Host.db ~= database or Host.characterKey ~= character or ui.widgetID ~= id or ui.fontEditor ~= draft then return false end
         local shown, visible = control:IsShown(), window:IsVisible()
         if not public(shown) or shown ~= true or not public(visible) or visible ~= true or Host:GetProfile() ~= profile then return false end
+        if profile and profile.theme ~= theme then return false end
         if id then
             local current = Model.GetWidget(database, character, id)
             return current ~= nil and current == instance and current.settings == settings and Host.types[current.type] == definition
@@ -700,14 +706,10 @@ function UI:Text(caption, current, apply)
     return control
 end
 
-function UI:Number(caption, current, minimum, maximum, apply, integer, canEdit)
-    if integer then minimum, maximum = math.ceil(minimum), math.floor(maximum) end
-    if not number(current) then current = minimum end
-    current = math.max(minimum, math.min(maximum, current))
-    if integer then current = math.max(math.ceil(minimum), math.floor(current)) end
-    local row = self:Row(caption, 40)
-    local control = self:Acquire("number", function()
-        local frame = CreateFrame("Frame", nil, self.window.content)
+local function numberField(ui, caption, pool, enabled)
+    local row = ui:Row(caption, 40)
+    local control = ui:Acquire(pool, function()
+        local frame = CreateFrame("Frame", nil, ui.window.content)
         frame.edit = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
         frame.edit:SetAutoFocus(false); frame.edit:SetMaxLetters(24)
         frame.edit:SetPoint("LEFT", 6, 0); frame.edit:SetHeight(24)
@@ -719,18 +721,27 @@ function UI:Number(caption, current, minimum, maximum, apply, integer, canEdit)
         return frame
     end)
     mark(control, caption, "number")
-    local width = self:GetControlWidth()
+    local width = ui:GetControlWidth()
     control:SetSize(width, 38)
     control.edit:SetWidth(math.max(40, width - 42))
     control.edit:SetTextInsets(6, 8, 0, 0)
     control:SetPoint("RIGHT", row, "RIGHT")
-    control.edit:SetText(tostring(current or 0))
-    local enabled = not canEdit or canEdit()
     control.edit:SetEnabled(enabled)
     if not enabled then control.edit:ClearFocus() end
     local shade = enabled and 1 or 0.5
     control.edit:SetTextColor(shade, shade, shade)
     row.Label:SetFontObject(enabled and GameFontNormal or GameFontDisable)
+    return control
+end
+
+function UI:Number(caption, current, minimum, maximum, apply, integer, canEdit)
+    if integer then minimum, maximum = math.ceil(minimum), math.floor(maximum) end
+    if not number(current) then current = minimum end
+    current = math.max(minimum, math.min(maximum, current))
+    if integer then current = math.max(minimum, math.floor(current)) end
+    local enabled = not canEdit or canEdit()
+    local control = numberField(self, caption, "number", enabled)
+    control.edit:SetText(tostring(current))
     local active = controlSession(self, control)
     local function editable() return active() and (not canEdit or canEdit()) end
     local function commit(value)
@@ -793,7 +804,7 @@ function UI:Slider(caption, current, minimum, maximum, step, apply, format)
     return control
 end
 
-function UI:Color(caption, current, apply)
+function UI:Color(caption, current, apply, rgbOnly)
     current = colorValue(current) or { 1, 1, 1, 1 }
     local row = self:Row(caption)
     local control = self:Acquire("color", function()
@@ -843,14 +854,14 @@ function UI:Color(caption, current, apply)
         local function changed()
             if not active() then return end
             local r, g, b = picker:GetColorRGB()
-            local color = colorValue({ r, g, b, picker:GetColorAlpha() })
+            local color = colorValue({ r, g, b, rgbOnly and 1 or picker:GetColorAlpha() })
             if not color then return end
             current = color
             apply(color); control.swatch:SetColorTexture(unpack(color))
         end
         self.colorOwner, self.colorSession = control, session
         picker:SetupColorPickerAndShow({ r = current[1], g = current[2], b = current[3],
-            hasOpacity = true, opacity = current[4], swatchFunc = changed, opacityFunc = changed,
+            hasOpacity = not rgbOnly, opacity = current[4], swatchFunc = changed, opacityFunc = changed,
             extraInfo = session,
             cancelFunc = function()
                 if not active() then return end
@@ -921,12 +932,12 @@ function UI:Section(caption)
     self.y = self.y - 46
 end
 
-function UI:OpenFontEditor()
+function UI:OpenFontEditor(forPanels)
     self.widgetID = nil
-    self.fontEditor = self.fontEditor or { name = "", regular = "", bold = "", italic = "", bolditalic = "" }
+    self.fontEditor = self.fontEditor or { name = "", regular = "", bold = "", italic = "", bolditalic = "", forPanels = forPanels }
     if not self.renderingSettings then self:ShowSettingsCategory(); return end
     local draft = self.fontEditor
-    self:ClearWindow("Menubar - Register custom font")
+    self:ClearWindow(draft.forPanels and "Menubar - Register panel font" or "Menubar - Register custom font")
     self:Note("Use game-accessible font files. Bold and italic require matching face files; the addon does not simulate them with outlines.")
     for _, field in ipairs({ { "name", "Font name" }, { "regular", "Regular font file" }, { "bold", "Bold font file (optional)" },
         { "italic", "Italic font file (optional)" }, { "bolditalic", "Bold italic file (optional)" } }) do
@@ -944,19 +955,78 @@ function UI:OpenFontEditor()
         for _, key in ipairs({ "regular", "bold", "italic", "bolditalic" }) do
             local path = draft[key]:match("^%s*(.-)%s*$")
             if path ~= "" then
-                local ok, result = pcall(probe.SetFont, probe, path, Host:GetProfile().fontSize, "")
-                if not ok or result == false then self.window.status:SetText("Could not load the " .. key .. " font file."); return end
+                if not Fonts.TrySetFont(probe, path, Host:GetProfile().fontSize, "") then
+                    self.window.status:SetText("Could not load the " .. key .. " font file.")
+                    return
+                end
                 if key == "regular" then draft.regular = path else faces[key] = path end
             end
         end
         local entry, message = Fonts.AddCustom(Host.db, draft.name, draft.regular, faces)
         if not entry then self.window.status:SetText(message); return end
-        Host:GetProfile().font, Host:GetProfile().fontStyle = entry.regular, "regular"
-        Host:Rebuild(); self.fontEditor = nil; self:OpenSettings()
+        local profile = Host:GetProfile()
+        local target = draft.forPanels and profile.popupText or profile
+        target.font, target.fontStyle = entry.regular, "regular"
+        if not draft.forPanels then Host:Rebuild() end
+        self.fontEditor = nil
+        self:OpenSettings()
     end)
     self:Action("Back to appearance", function() self.fontEditor = nil; self:OpenSettings() end)
     self:Note("Windows/macOS font catalogues are not exposed to addons. Files must be installed in a game-accessible location, then registered here or by another addon.")
     self:Finish()
+end
+
+local function panelSizeField(ui, panel)
+    -- Give wheel-enabled controls their own pool so other number fields still scroll the settings page.
+    local control = numberField(ui, "Panel font size", "panelSize", true)
+    local active = controlSession(ui, control)
+    local minimum, maximum = 8, 24
+    local defaultLabel = "Theme default"
+    local function display()
+        local size = panel.fontSize
+        control.edit:SetText(size == 0 and defaultLabel or tostring(size))
+        control.down:SetEnabled(size ~= 0)
+        control.up:SetEnabled(size < maximum)
+    end
+    local function step(_, delta)
+        if not active() or not number(delta) or delta == 0 then return end
+        local size = panel.fontSize
+        if delta > 0 then
+            panel.fontSize = math.min(maximum, math.max(minimum, size + 1))
+        else
+            panel.fontSize = size <= minimum and 0 or size - 1
+        end
+        ui.window.status:SetText("")
+        display()
+    end
+    control.up:SetScript("OnClick", function() step(control, 1) end)
+    control.down:SetScript("OnClick", function() step(control, -1) end)
+    for _, region in ipairs({ control, control.edit, control.up, control.down }) do
+        region:EnableMouseWheel(true)
+        region:SetScript("OnMouseWheel", step)
+    end
+    control.edit:SetScript("OnEnterPressed", function(edit)
+        if not active() then return end
+        local input = edit:GetText()
+        if not public(input) or type(input) ~= "string" then return end
+        input = input:match("^%s*(.-)%s*$")
+        local value = tonumber(input)
+        if input == "" or input:lower() == defaultLabel:lower() then value = 0 end
+        if value == 0 or (number(value) and value >= minimum and value <= maximum and value % 1 == 0) then
+            panel.fontSize = value
+            ui.window.status:SetText("")
+        else
+            ui.window.status:SetText("Enter a whole number from 8 to 24, or clear the field for Theme default.")
+        end
+        edit:ClearFocus()
+        display()
+    end)
+    control.edit:SetScript("OnEscapePressed", function(edit)
+        if not active() then return end
+        edit:ClearFocus()
+        display()
+    end)
+    display()
 end
 
 function UI:OpenSettings()
@@ -966,7 +1036,7 @@ function UI:OpenSettings()
     local profile = Host:GetProfile()
     local character = Model.GetCharacter(Host.db, Host.characterKey)
     local function change(key, value) profile[key] = value; Host:Rebuild() end
-    self:Note("Appearance profiles are shared. Widgets, order and settings belong to each character.")
+    self:Note("Each theme remembers its fonts and opacity in this appearance profile. Profiles are shared across characters. Widget settings and order belong to each character.")
     self:Section("Profiles")
     local profiles = {}
     for name in pairs(Host.db.profiles) do profiles[#profiles + 1] = { value = name, label = name } end
@@ -977,8 +1047,9 @@ function UI:OpenSettings()
     self:Action("New profile...", function() self:OpenNewProfileDialog() end)
     self:Section("Bar layout")
     self:Select("Bar style", profile.theme, { { value = "system7", label = "Mac OS 7.6 (Harmony)" },
-        { value = "macos8", label = "Mac OS 8 (Platinum)" },
+        { value = "macos8", label = "Mac OS 8.1 (Platinum)" },
         { value = "macosx", label = "Mac OS X (Aqua)" },
+        { value = "macos27", label = "macOS 27 (Liquid Glass)" },
         { value = "warcraftBrown", label = "Warcraft Brown" },
         { value = "warcraftBlack", label = "Warcraft Black" },
         { value = "warcraftRed", label = "Warcraft Red" } }, function(value)
@@ -993,12 +1064,14 @@ function UI:OpenSettings()
     end
     self:Toggle("Rounded outer corners", profile.roundedCorners, function(value) change("roundedCorners", value) end)
     self:Number("Height (UI units)", profile.height, 16, 96, function(value) change("height", value) end, true)
-    self:Slider("Background opacity", profile.opacity * 100, 0, 100, 1,
-        function(value) change("opacity", value / 100) end, function(value) return string.format("%.0f%%", value) end)
+    self:Slider("Bar opacity", profile.opacity * 100, 0, 100, 1,
+        function(value) change("opacity", value / 100) end, formatPercent)
     self:Number("Edge padding", profile.padding, 0, 64, function(value) change("padding", value) end, true)
     self:Number("Widget spacing", profile.spacing, 0, 64, function(value) change("spacing", value) end, true)
-    self:Section("Text")
-    self:Select("Font", profile.font, Fonts.Options(Host.db.customFonts, profile.font), function(value)
+    local panel = profile.popupText
+    local fonts = Fonts.Options(Host.db.customFonts, profile.font, panel.font ~= "theme" and panel.font or nil)
+    self:Section("Bar text")
+    self:Select("Font", profile.font, fonts, function(value)
         profile.fontStyle = "regular"; change("font", value)
     end)
     self:Select("Font style", profile.fontStyle, Fonts.Styles(profile.font, Host.db.customFonts),
@@ -1007,9 +1080,33 @@ function UI:OpenSettings()
     self:Toggle("Text shadow", profile.textShadow, function(value) change("textShadow", value) end)
     self:Action("Register custom font...", function() self:OpenFontEditor() end)
     self:Color("Text colour", profile.textColor, function(value) change("textColor", value) end)
+    self:Section("Menus and tooltips")
+    self:Slider("Menu and tooltip opacity", profile.popupOpacity * 100, 0, 100, 1,
+        function(value) profile.popupOpacity = value / 100 end, formatPercent)
+    local panelFonts = { { value = "theme", label = "Theme default" } }
+    for _, option in ipairs(fonts) do panelFonts[#panelFonts + 1] = option end
+    self:Select("Panel font", panel.font, panelFonts, function(value)
+        panel.font, panel.fontStyle = value, "regular"
+    end)
+    if panel.font ~= "theme" then
+        self:Select("Panel font style", panel.fontStyle, Fonts.Styles(panel.font, Host.db.customFonts),
+            function(value) panel.fontStyle = value end)
+    end
+    panelSizeField(self, panel)
+    self:Toggle("Use custom panel text colour", panel.useCustomColor, function(value)
+        if value and not panel.textColor then
+            local colour = MenubarSkins.Popup.DefaultTextColor(profile)
+            panel.textColor = { colour[1], colour[2], colour[3], 1 }
+        end
+        panel.useCustomColor = value
+    end)
+    if panel.useCustomColor then
+        self:Color("Panel text colour", panel.textColor, function(value) panel.textColor = value end, true)
+    end
+    self:Action("Register panel font...", function() self:OpenFontEditor(true) end)
     self:Section("Background and borders")
     local patterns = { { value = "solid", label = "Solid" }, { value = "dither", label = "Fine lines" } }
-    if MenubarSkins.IsWarcraft(profile.theme) or profile.theme == "macosx" then
+    if Model.Themes[profile.theme].texture == "theme" then
         table.insert(patterns, 1, { value = "theme", label = "Style texture" })
     end
     self:Select("Background pattern", profile.texture, patterns, function(value) change("texture", value) end)
@@ -1026,6 +1123,7 @@ function UI:OpenSettings()
     self:Action("Restore to defaults", function()
         local placement, menu = profile.placement, profile.coreMenuBar
         for key, value in pairs(Model.DefaultProfile) do profile[key] = Model.DeepCopy(value) end
+        profile.opacityBeforeGlass = nil
         profile.placement, profile.coreMenuBar = placement, menu
         Host:Rebuild(); self:OpenSettings()
     end)

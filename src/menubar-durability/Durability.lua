@@ -1,22 +1,29 @@
--- Original equipped-durability provider. Blizzard artwork is referenced in the client.
-local texturePath = "Interface\\Durability\\UI-Durability-Icons"
-local repairAtlas = "SpellIcon-256x256-Repair"
--- Facts from Forever's durability XML: inventory slot, label, native alert index,
--- and texture crop. Native alert indices are not inventory slot IDs.
+-- Equipped durability and native inventory alerts.
+local media = "Interface\\AddOns\\Menubar_Durability\\Media\\"
+local hammerTexture, monochromeHammer = media .. "repair-hammer.tga", media .. "repair-hammer-mono.tga"
+-- GetInventoryAlertStatus uses the order of the slots in Forever's durability XML.
+-- GetInventoryItemDurability uses the inventory slot ID instead.
 local slots = {
-    { id = 1, name = "Head", uv = { 0, 0.140625, 0, 0.171875 } },
-    { id = 3, name = "Shoulders", uv = { 0.140625, 0.515625, 0, 0.171875 } },
-    { id = 5, name = "Chest", uv = { 0.515625, 0.6640625, 0, 0.171875 } },
-    { id = 6, name = "Waist", uv = { 0.328125, 0.46875, 0.171875, 0.203125 } },
-    { id = 7, name = "Legs", uv = { 0.46875, 0.6875, 0.171875, 0.3203125 } },
-    { id = 8, name = "Feet", uv = { 0.6875, 1, 0.171875, 0.4140625 } },
-    { id = 9, name = "Wrists", uv = { 0.6640625, 1, 0, 0.171875 } },
-    { id = 10, name = "Hands", uv = { 0, 0.328125, 0.171875, 0.3046875 } },
-    { id = 16, name = "Main hand", uv = { 0, 0.140625, 0.3203125, 0.6640625 } },
-    { id = 17, name = "Off hand", uv = { 0.1875, 0.375, 0.3203125, 0.5546875 } },
-    { id = 18, name = "Ranged", uv = { 0.1875, 0.3984375, 0.5546875, 0.84375 } },
+    { id = 1, name = "Head" },
+    { id = 3, name = "Shoulders" },
+    { id = 5, name = "Chest" },
+    { id = 6, name = "Waist" },
+    { id = 7, name = "Legs" },
+    { id = 8, name = "Feet" },
+    { id = 9, name = "Wrists" },
+    { id = 10, name = "Hands" },
+    { id = 16, name = "Main hand" },
+    { id = 17, name = "Off hand" },
+    { id = 18, name = "Ranged" },
 }
 local colors = { { 1, 0.82, 0.18 }, { 0.93, 0.07, 0.07 } }
+
+local lightSurfacePrefixes = { "|cff775000", "|cff981f26" }
+local alertPrefixes = {}
+for i, color in ipairs(colors) do
+    alertPrefixes[i] = string.format("|cff%02x%02x%02x", math.floor(color[1] * 255 + 0.5),
+        math.floor(color[2] * 255 + 0.5), math.floor(color[3] * 255 + 0.5))
+end
 
 local function public(value)
     return type(issecretvalue) ~= "function" or not issecretvalue(value)
@@ -287,56 +294,60 @@ local function requestNative(widget)
     if next(nativeRequests) or next(nativeMasks) or nativeArmed then synchronizeNative() end
 end
 
-local function hideRegions(widget)
-    if widget.durabilitySummaryIcon then widget.durabilitySummaryIcon:Hide() end
-    for _, region in ipairs(widget.durabilityRegions or {}) do
-        if region.icon then region.icon:Hide() end
-        if region.label then region.label:Hide() end
+local function brightness(color)
+    return color[1] * 0.2126 + color[2] * 0.7152 + color[3] * 0.0722
+end
+
+local function lightMacSurface(profile)
+    if not profile then return false end
+    local theme = profile.theme
+    if theme ~= "system7" and theme ~= "macos8" and theme ~= "macosx" then return false end
+    local texture = profile.texture
+    if (texture == "solid" or texture == "dither" or texture == "theme")
+        and profile.opacity * profile.background[4] > 0.2 then
+        return brightness(profile.background) >= 0.5
     end
+    -- A custom image or the scene behind a clear bar has no fixed colour.
+    return brightness(profile.textColor) < 0.5
 end
 
-local function repairArtAvailable()
-    if not public(C_Texture) then return false end
-    if C_Texture == nil then return true end
-    if type(C_Texture) ~= "table" then return false end
-    local lookup = C_Texture.GetAtlasInfo
-    if not public(lookup) then return false end
-    if lookup == nil then return true end
-    if type(lookup) ~= "function" then return false end
-    local ok, info = pcall(lookup, repairAtlas)
-    if not ok or not public(info) or type(info) ~= "table" then return false end
-    local width, height = rawget(info, "width"), rawget(info, "height")
-    return number(width) and width > 0 and number(height) and height > 0
-end
-
-local function summaryIcon(widget)
-    if not repairArtAvailable() then return nil end
+local function repairIcon(widget, profile, alpha)
     local icon = widget.durabilitySummaryIcon
     if not icon then
-        icon = widget.frame:CreateTexture(nil, "ARTWORK")
+        if type(widget.frame.CreateTexture) ~= "function" then return end
+        local ok, created = pcall(widget.frame.CreateTexture, widget.frame, nil, "ARTWORK")
+        if not ok or not created then return end
+        icon = created
         widget.durabilitySummaryIcon = icon
     end
-    icon:Hide()
-    if type(icon.SetAtlas) ~= "function" then return nil end
-    -- SetAtlas has no native return value; nil is success, not a missing icon.
-    local accepted = icon:SetAtlas(repairAtlas, false)
-    assert(public(accepted) and accepted ~= false, "Durability repair icon could not be applied")
-    if type(icon.GetAtlas) == "function" then
-        local actual = icon:GetAtlas()
-        -- The native getter may canonicalize an accepted atlas name's casing.
-        assert(public(actual) and type(actual) == "string" and actual:lower() == repairAtlas:lower(),
-            "Durability repair icon could not be applied")
+    local monochrome = profile and (profile.theme == "macosx" or profile.theme == "macos27")
+    local texture = monochrome and monochromeHammer or hammerTexture
+    if widget.durabilityTexture ~= texture then
+        widget.durabilityTexture = nil
+        icon:Hide()
+        local ok, accepted = pcall(icon.SetTexture, icon, texture)
+        if not ok or not public(accepted) or accepted == false then return end
+        if type(icon.GetTexture) == "function" then
+            local readable, actual = pcall(icon.GetTexture, icon)
+            if not readable or not public(actual) or not actual then return end
+        elseif accepted ~= true then return end
+        widget.durabilityTexture = texture
     end
-    local height = math.min(16, widget.content and widget.content:GetHeight() or 16)
-    icon:SetSize(height, height)
-    icon:SetVertexColor(1, 1, 1, 1)
+    if monochrome then
+        icon:SetVertexColor(unpack(profile.textColor))
+    else
+        icon:SetVertexColor(1, 1, 1, alpha)
+    end
+    local size = math.min(16, widget.content and widget.content:GetHeight() or 16)
+    icon:SetSize(size, size)
     icon:ClearAllPoints()
-    icon:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", 4, 0)
-    return icon
+    icon:SetPoint("LEFT", widget.content or widget.frame, "LEFT", 4, 0)
+    icon:Show()
+    return size
 end
 
 local function resetPresentation(widget)
-    hideRegions(widget)
+    if widget.durabilitySummaryIcon then widget.durabilitySummaryIcon:Hide() end
     widget.customWidth = nil
     widget.label:ClearAllPoints()
     widget.label:SetPoint("CENTER", widget.content or widget.frame, "CENTER")
@@ -348,92 +359,53 @@ local function reset(widget)
     resetPresentation(widget)
 end
 
-local function region(widget, index)
-    widget.durabilityRegions = widget.durabilityRegions or {}
-    local value = widget.durabilityRegions[index]
-    if not value then value = {}; widget.durabilityRegions[index] = value end
-    if not value.icon then value.icon = widget.frame:CreateTexture(nil, "ARTWORK") end
-    if not value.label then value.label = widget.frame:CreateFontString(nil, "OVERLAY") end
-    return value
-end
-
-local function styleLabel(widget, label)
-    local path, size, flags = widget.label:GetFont()
-    assert(label:SetFont(path, size, flags) == true, "Durability font could not be applied")
-    label:SetWordWrap(false)
-    if type(widget.label.GetShadowColor) == "function" then
-        label:SetShadowColor(widget.label:GetShadowColor())
-        label:SetShadowOffset(widget.label:GetShadowOffset())
-    else
-        label:SetShadowColor(0, 0, 0, 0)
-        label:SetShadowOffset(0, 0)
+local function barText(state, prefixes)
+    if #state.alerts == 0 then
+        local value = state.average and percentage(state.average) or (state.incomplete and "--" or "N/A")
+        if state.alertsUnknown then value = value .. " ?" end
+        return value, "Durability " .. value
     end
-end
-
-local function offhandUV()
-    if not public(C_PaperDollInfo) or type(C_PaperDollInfo) ~= "table" then return nil end
-    local method = C_PaperDollInfo.OffhandHasWeapon
-    if not public(method) or type(method) ~= "function" then return nil end
-    local ok, weapon = pcall(method)
-    if ok and public(weapon) and weapon == true then return slots[9].uv end
+    local display, summary = {}, {}
+    for i, item in ipairs(state.alerts) do
+        local text = item.slot.name .. " " .. (item.ratio and percentage(item.ratio) or "--")
+        display[i] = prefixes[item.alert] .. text .. "|r"
+        summary[i] = text
+    end
+    local suffix = (state.incomplete and " --" or "") .. (state.alertsUnknown and " ?" or "")
+    return table.concat(display, "  ") .. suffix, "Durability: " .. table.concat(summary, ", ")
 end
 
 local function render(widget)
-    local state = read(widget.settings)
-    resetPresentation(widget)
-    if #state.alerts == 0 then
-        widget.customWidth = nil
-        local text = state.average and percentage(state.average) or (state.incomplete and "--" or "N/A")
-        if state.alertsUnknown then text = text .. " ?" end
-        widget:SetText("Durability " .. text)
-        widget.label:SetText(text)
-        local icon = summaryIcon(widget)
-        if icon then
-            widget.label:ClearAllPoints()
-            widget.label:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", 23, 0)
-            widget:SetWidth(widget.label:GetStringWidth() + 27)
-            icon:Show()
-        else
-            -- Missing optional artwork must not hide a readable percentage.
-            widget:SetWidth(math.max(18, widget.label:GetStringWidth() + 8))
-        end
-        return
+    local profile = Menubar.GetProfile and Menubar:GetProfile()
+    local light = lightMacSurface(profile)
+    local text, summary = barText(read(widget.settings), light and lightSurfacePrefixes or alertPrefixes)
+    local label = widget.label
+    local path, size, flags = label:GetFont()
+    local desiredFlags = light and "" or "OUTLINE"
+    if flags ~= desiredFlags then
+        assert(label:SetFont(path, size, desiredFlags) == true, "Durability font could not be applied")
     end
-    local position, summary = 4, {}
-    for index, item in ipairs(state.alerts) do
-        local value = region(widget, index)
-        local uv = item.slot.id == 17 and offhandUV() or nil
-        uv = uv or item.slot.uv
-        local w, h = uv[2] - uv[1], uv[4] - uv[3]
-        local height = math.min(16, widget.content and widget.content:GetHeight() or 16)
-        local scale = height / math.max(w, h)
-        assert(value.icon:SetTexture(texturePath) == true, "Durability icon could not be applied")
-        value.icon:SetTexCoord(unpack(uv))
-        value.icon:SetSize(w * scale, h * scale)
-        value.icon:ClearAllPoints()
-        value.icon:SetPoint("CENTER", (widget.content or widget.frame), "LEFT", position + 8, 0)
-        local color = colors[item.alert]
-        value.icon:SetVertexColor(color[1], color[2], color[3], 1)
-        value.icon:Show()
-        styleLabel(widget, value.label)
-        local text = item.ratio and percentage(item.ratio) or "--"
-        value.label:SetText(text)
-        value.label:SetTextColor(color[1], color[2], color[3], 1)
-        value.label:ClearAllPoints()
-        value.label:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", position + 19, 0)
-        value.label:Show()
-        position = position + 19 + value.label:GetStringWidth() + 7
-        summary[#summary + 1] = item.slot.name .. " " .. text
+    local _, _, _, alpha = label:GetTextColor()
+    if light then
+        local ink = profile.textColor
+        if brightness(ink) < 0.5 then label:SetTextColor(unpack(ink))
+        else label:SetTextColor(0, 0, 0, alpha) end
+    else
+        label:SetTextColor(1, 1, 1, alpha)
     end
-    widget:SetText("Durability: " .. table.concat(summary, ", "))
-    local suffix = (state.incomplete and "--" or "") .. (state.alertsUnknown and " ?" or "")
-    widget.label:SetText(suffix)
-    if suffix ~= "" then
-        widget.label:ClearAllPoints()
-        widget.label:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", position, 0)
-        position = position + widget.label:GetStringWidth() + 4
+    label:SetShadowOffset(0, 0)
+    widget:SetText(summary)
+    label:SetText(text)
+    label:ClearAllPoints()
+    local iconSize = repairIcon(widget, profile, alpha)
+    if iconSize then
+        local left = 4 + iconSize + 3
+        label:SetPoint("LEFT", widget.content or widget.frame, "LEFT", left, 0)
+        widget:SetWidth(left + label:GetStringWidth() + 4)
+    else
+        label:SetPoint("CENTER", widget.content or widget.frame, "CENTER")
+        widget:SetWidth(math.max(18, label:GetStringWidth() + 8))
     end
-    widget:SetWidth(position - 3)
 end
 
 local function update(widget)

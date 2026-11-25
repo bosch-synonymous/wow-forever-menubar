@@ -59,6 +59,7 @@ local function fixture(presence, options)
     GetInboxText = function() error("Widget must never mark messages read", 0) end
     TakeInboxItem = function() error("Widget must never collect attachments", 0) end
     loadAddon(core, "Menubar")
+    if options.atlasReadback then Menubar.ApplyThemeIcon = nil end -- Exercise older hosts with native artwork.
     Menubar:RegisterWidgetType({ id = "time", name = "Clock fixture", defaults = {},
         defaultPlacement = { bar = "top", alignment = "right" }, update = function(widget) widget:SetText("12:34") end })
     loadAddon(root, "Menubar_Mail")
@@ -150,11 +151,24 @@ check("plain clicking is quiet and native Menubar interactions remain available"
     equal(GameTooltip.lines[#GameTooltip.lines][1], "Shift-left-click: menu   Right-click: settings")
 end)
 
+check("a rejected glyph falls back to text without a button plate", function()
+    local f = fixture(false)
+    local icon = f.widget.mailIcon
+    local apply = f.host.ApplyThemeIcon
+    f.host.ApplyThemeIcon = function() return false end
+    f.host:RefreshWidget(f.widget.id)
+    equal(icon:IsShown(), false); equal(icon:GetAtlas(), nil)
+    equal(f.widget.label:GetText(), "0")
+    f.host.ApplyThemeIcon = apply
+    f.host:RefreshWidget(f.widget.id)
+    equal(icon:IsShown(), true); equal(f.widget.mailIcon, icon)
+end)
+
 check("mail arrivals animate the owned envelope while the count and neighboring clock stay anchored", function()
     local f = fixture(false); local widget = f.widget; local icon = assert(widget.mailIcon)
     local width, clockPosition = widget.width, f:position(f.clock)
-    equal(icon.atlas, "ui-hud-minimap-mail-icon"); equal(widget.label.text, "0")
-    equal(icon:GetWidth() / icon:GetHeight(), 4 / 3); equal(widget.iconJiggle, nil)
+    equal(icon.texCoords[1], 4 / 8); equal(widget.label.text, "0")
+    equal(icon:GetWidth(), icon:GetHeight()); equal(widget.iconJiggle, nil)
     f.presence = true; f:tick(); f:tick(); equal(widget.iconJiggle, nil)
     f:emit("UPDATE_PENDING_MAIL")
     local motion = assert(widget.iconJiggle); equal(motion.icon, icon); equal(motion.group.parent, icon)
@@ -166,6 +180,27 @@ check("mail arrivals animate the owned envelope while the count and neighboring 
     motion.group:Finish(); f.presence = false; f:emit("UPDATE_PENDING_MAIL")
     f.presence = true; f:emit("UPDATE_PENDING_MAIL"); equal(motion.group.plays, 2)
     equal(f:observerCount(), 1)
+end)
+
+check("Mail keeps one animated envelope across Mac and Warcraft artwork changes", function()
+    local f = fixture(false)
+    local icon = f.widget.mailIcon
+    local width = f.widget.width
+    for index, theme in ipairs({ "system7", "macos8", "macosx", "macos27" }) do
+        assert(MenubarModel.ApplyTheme(f.host:GetProfile(), theme))
+        f.host:Rebuild()
+        equal(f.widget.mailIcon, icon)
+        equal(f.widget.width, width)
+        equal(icon.texCoords[1], 4 / 8)
+        equal(icon.texCoords[3], (index - 1) / 4)
+        equal(icon:IsShown(), true)
+    end
+    f.presence = true; f:emit("UPDATE_PENDING_MAIL")
+    equal(assert(f.widget.iconJiggle).icon, icon)
+    assert(MenubarModel.ApplyTheme(f.host:GetProfile(), "warcraftBrown"))
+    f.host:Rebuild()
+    equal(icon.texCoords[1], 4 / 8); equal(icon.texCoords[3], 0)
+    equal(icon.vertexColor[1], 1)
 end)
 
 check("new complete inbox sessions are quiet before observable complete growth in either event order", function()

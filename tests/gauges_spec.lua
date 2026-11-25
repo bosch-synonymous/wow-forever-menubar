@@ -787,7 +787,7 @@ check("an interrupted native rested mask setup retries the owned texture and ins
     bonus = nil; refresh()
 end)
 
-check("theme-default framing follows all six themes while reusing gauge art and preserving progress", function()
+check("theme-default framing follows all registered themes while reusing gauge art and preserving progress", function()
     local profile = Menubar:GetProfile()
     local oldTheme, oldStyle, oldBonus, oldAtlas = profile.theme, widget.settings.gaugeStyle, bonus, atlas
     local oldHeight, oldTop, oldBottom = profile.height, profile.topLineSize, profile.bottomLineSize
@@ -795,7 +795,7 @@ check("theme-default framing follows all six themes while reusing gauge art and 
     widget.settings.gaugeStyle, widget.settings.presentation = "theme", "gauge"
     current, maximum, shade, overlay, atlas = 25, 100, { 0.2, 0.7, 0.3, 1 }, "25%", nil
     bonus = { value = 30, color = { 0.3, 0.65, 1, 1 } }
-    local themes = { { "system7", "square" }, { "macos8", "square" }, { "macosx", "square" },
+    local themes = { { "system7", "square" }, { "macos8", "square" }, { "macosx", "square" }, { "macos27", "square" },
         { "warcraftBrown", "warcraft" }, { "warcraftBlack", "warcraft" }, { "warcraftRed", "warcraft" } }
     for _, choice in ipairs(themes) do
         assert(MenubarModel.Themes[choice[1]], "The gauge matrix must use registered themes")
@@ -846,7 +846,7 @@ check("explicit gauge overrides win on every theme while unsupported theme conte
     profile.height, profile.topLineSize, profile.bottomLineSize = 28, 1, 1
     for _, style in ipairs({ "square", "warcraft" }) do
         widget.settings.gaugeStyle = style
-        for _, theme in ipairs({ "system7", "macos8", "macosx", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
+        for _, theme in ipairs({ "system7", "macos8", "macosx", "macos27", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
             profile.theme = theme; Menubar:Rebuild()
             equal(widget.gaugeStyleUsed, style); equal(widget.settings.gaugeStyle, style)
         end
@@ -890,12 +890,12 @@ local function centerY(region)
     return bottom + height / 2
 end
 
-check("visual bodies align both gauge renderers and ordinary text across all six themes", function()
+check("visual bodies align both gauge renderers and ordinary text across all registered themes", function()
     local profile = Menubar:GetProfile()
     local originalProfile = MenubarModel.DeepCopy(profile)
     local originalStyle, originalPresentation = widget.settings.gaugeStyle, widget.settings.presentation
     local frame, content, gauge, label = widget.frame, widget.content, widget.gauge, widget.label
-    for _, theme in ipairs({ "system7", "macos8", "macosx", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
+    for _, theme in ipairs({ "system7", "macos8", "macosx", "macos27", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
         assert(MenubarModel.ApplyTheme(profile, theme))
         profile.height, profile.placement, profile.coreMenuBar = 28, "both", "both"
         for _, style in ipairs({ "square", "warcraft" }) do

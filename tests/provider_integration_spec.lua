@@ -285,7 +285,7 @@ if completeAlignmentFixture then
             retained[kind] = value
         end
         local profile = Menubar:GetProfile()
-        for _, theme in ipairs({ "system7", "macos8", "macosx", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
+        for _, theme in ipairs({ "system7", "macos8", "macosx", "macos27", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
             assert(MenubarModel.ApplyTheme(profile, theme))
             profile.placement = "both"
             for _, name in ipairs({ "top", "bottom" }) do
@@ -311,13 +311,24 @@ if completeAlignmentFixture then
                 for _, pair in ipairs({
                     { "mail", "mailIcon" }, { "social", "socialIcon" },
                     { "volume", "volumeIcon" }, { "network", "networkIcon" },
-                    { "network", "networkOutline" }, { "performance", "performanceIcon" },
-                    { "performance", "performanceIconOutline" }, { "durability", "durabilitySummaryIcon" },
+                    { "performance", "performanceIcon" }, { "durability", "durabilitySummaryIcon" },
                 }) do
                     local value = widget(pair[1])
                     anchoredTo(value[pair[2]], value.content)
                     near(visualCenter(value[pair[2]]), expectedCenter)
                 end
+                -- Outlines exist only on presets that use them. Their placement
+                -- still follows the same content rectangle as the icon itself.
+                local function checkOutline(value, region, expected)
+                    equal(region and region:IsVisible() or false, expected)
+                    if expected then
+                        anchoredTo(region, value.content)
+                        near(visualCenter(region), expectedCenter)
+                    end
+                end
+                local network, performance = widget("network"), widget("performance")
+                checkOutline(network, network.networkOutline, MenubarSkins.IsWarcraft(theme))
+                checkOutline(performance, performance.performanceIconOutline, theme ~= "macos8" and theme ~= "macosx")
                 local currency = widget("currency")
                 for _, key in ipairs({ "gold", "silver", "copper" }) do
                     anchoredTo(currency.currencyVisual.icons[key], currency.content)
@@ -345,17 +356,18 @@ if completeAlignmentFixture then
         end
     end)
 
-    check("Durability warning cartouches keep icon and percentage on the shared centre", function()
+    check("Durability warnings keep the hammer and slot percentages on the shared centre", function()
         local value = widget("durability")
         durabilityRemaining = 10
         Menubar:RefreshWidget(value.id)
         assert(not value.failed, tostring(value.failed))
-        assert(not value.durabilitySummaryIcon:IsShown())
-        local warning = assert(value.durabilityRegions[1])
-        anchoredTo(warning.icon, value.content)
-        anchoredTo(warning.label, value.content)
-        near(visualCenter(warning.icon), visualCenter(value.content))
-        near(visualCenter(warning.label), visualCenter(value.content))
+        local icon = assert(value.durabilitySummaryIcon)
+        assert(icon:IsShown())
+        assert(value.label:GetText():find("10%", 1, true))
+        anchoredTo(icon, value.content)
+        anchoredTo(value.label, value.content)
+        near(visualCenter(icon), visualCenter(value.content))
+        near(visualCenter(value.label), visualCenter(value.content))
         durabilityRemaining = 85
         Menubar:RefreshWidget(value.id)
     end)
@@ -389,7 +401,7 @@ if completeAlignmentFixture then
                 durabilityRemaining = remaining
                 Menubar:RefreshWidget(durability.id)
                 assert(not durability.failed, tostring(durability.failed))
-                local icon = remaining == 85 and durability.durabilitySummaryIcon or durability.durabilityRegions[1].icon
+                local icon = durability.durabilitySummaryIcon
                 inside(icon, durability.content)
             end
             durabilityRemaining = 85

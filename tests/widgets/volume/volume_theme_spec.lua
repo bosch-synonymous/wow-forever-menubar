@@ -19,7 +19,7 @@ C_CVar = {
     GetCVar = function(name) return audio[name] end,
     SetCVar = function(name, value) writes = writes + 1; audio[name] = tostring(value); return true end,
 }
-for _, file in ipairs({ "Model.lua", "Identity.lua", "Fonts.lua", "Layout.lua", "Gauge.lua", "Skins.lua", "Core.lua", "UI.lua", "Settings.lua" }) do
+for _, file in ipairs({ "Model.lua", "Identity.lua", "Fonts.lua", "Layout.lua", "Gauge.lua", "Skins.lua", "Core.lua", "ThemeIcons.lua", "UI.lua", "Settings.lua" }) do
     dofile(core .. "/src/menubar-core/" .. file)
 end
 dofile(root .. "/src/menubar-volume/Volume.lua")
@@ -41,6 +41,8 @@ end
 local function colourMatches()
     local actual = volume.volumeIcon.vertexColor
     local expected = { volume.label:GetTextColor() }
+    local theme = Menubar:GetProfile().theme
+    if theme == "system7" or theme == "macos8" then expected[1], expected[2], expected[3] = 1, 1, 1 end
     for index = 1, 4 do equal(actual[index], expected[index]) end
 end
 
@@ -92,16 +94,26 @@ end
 check("native volume icon follows every core theme across all four speaker states", function()
     local originalWidget, originalIcon = volume, volume.volumeIcon
     local profile = Menubar:GetProfile()
-    for _, theme in ipairs({ "system7", "macos8", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
+    for _, theme in ipairs({ "system7", "macos8", "macosx", "macos27", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
         assert(MenubarModel.ApplyTheme(profile, theme))
         Menubar:Rebuild()
         equal(Menubar.runtime[volume.id], originalWidget)
         equal(volume.volumeIcon, originalIcon)
-        for _, state in ipairs({ { "0", "muted" }, { "0.2", "low" }, { "0.5", "medium" }, { "0.9", "high" } }) do
+        for index, state in ipairs({ { "0", "muted" }, { "0.2", "low" }, { "0.5", "medium" }, { "0.9", "high" } }) do
             audio.Sound_MasterVolume = state[1]
             Menubar.eventFrame.scripts.OnEvent(Menubar.eventFrame, "CVAR_UPDATE", "Sound_MasterVolume", state[1])
             assert(not volume.failed, tostring(volume.failed))
-            assert(volume.volumeIcon.texture:find("volume%-" .. state[2] .. "%.tga"))
+            local rows = { system7 = 0, macos8 = 1, macosx = 2, macos27 = 3 }
+            if rows[theme] then
+                assert(volume.volumeIcon.texture:find("ThemeIcons\\status.tga", 1, true))
+                equal(volume.volumeIcon.texCoords[1], (index - 1) / 8)
+                equal(volume.volumeIcon.texCoords[3], rows[theme] / 4)
+                equal(Menubar:GetThemeIcon("unregistered-role"), nil)
+            else
+                assert(volume.volumeIcon.texture:find("volume%-" .. state[2] .. "%.tga"))
+                equal(volume.volumeIcon.texCoords[1], 0)
+                equal(volume.volumeIcon.texCoords[2], 1)
+            end
             colourMatches()
             equal(volume.label.font, profile.font)
             equal(volume.label.fontSize, profile.fontSize)

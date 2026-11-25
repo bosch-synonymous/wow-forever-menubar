@@ -28,25 +28,24 @@ local legacyProfileDefaults = {
     spacing = 12,
 }
 
+-- A theme may override any of these without changing another theme's defaults.
+local themeTextDefaults = {
+    font = "Fonts\\FRIZQT__.TTF",
+    fontSize = 12,
+    fontStyle = "regular",
+    textColor = { 1, 1, 1, 1 },
+    opacity = 0.7,
+    popupOpacity = 0.90,
+    popupText = { font = "theme", fontStyle = "regular", fontSize = 0, useCustomColor = false },
+}
+
 Model.DefaultProfile = {
     theme = "warcraftBrown",
     placement = "top",
     coreMenuBar = "both",
-    roundedCorners = false,
     height = 24,
-    font = "Fonts\\FRIZQT__.TTF",
-    fontSize = 12,
     fontFlags = "",
-    fontStyle = "regular",
-    textShadow = true,
-    opacity = 0.7,
-    background = { 1, 1, 1, 1 },
-    textColor = { 1, 0.82, 0, 1 },
-    topLine = { 0.48, 0.36, 0.18, 1 },
-    bottomLine = { 1, 1, 1, 1 },
-    topLineSize = 1,
-    bottomLineSize = 4,
-    texture = "theme",
+    themeTextSettings = {},
     padding = 8,
     spacing = 12,
 }
@@ -59,9 +58,9 @@ Model.Themes = {
         font = "Fonts\\FRIZQT__.TTF", fontStyle = "regular", textShadow = false, roundedCorners = true,
     },
     macos8 = {
-        theme = "macos8", background = { 0.8, 0.8, 0.8, 1 }, textColor = { 0, 0, 0, 1 },
-        topLine = { 1, 1, 1, 1 }, bottomLine = { 0.18, 0.18, 0.18, 1 },
-        topLineSize = 1, bottomLineSize = 2, texture = "solid",
+        theme = "macos8", background = { 0.87, 0.87, 0.87, 1 }, textColor = { 0, 0, 0, 1 },
+        topLine = { 1, 1, 1, 1 }, bottomLine = { 0.06, 0.06, 0.06, 1 },
+        topLineSize = 1, bottomLineSize = 1, texture = "solid",
         font = "Fonts\\FRIZQT__.TTF", fontStyle = "regular", textShadow = false, roundedCorners = true,
     },
     macosx = {
@@ -70,8 +69,16 @@ Model.Themes = {
         topLineSize = 1, bottomLineSize = 1, texture = "theme",
         font = "Fonts\\FRIZQT__.TTF", fontStyle = "regular", textShadow = false, roundedCorners = true,
     },
+    macos27 = {
+        theme = "macos27", background = { 0.055, 0.07, 0.09, 0.86 }, textColor = { 1, 1, 1, 1 },
+        topLine = { 1, 1, 1, 0.14 }, bottomLine = { 1, 1, 1, 0.20 },
+        topLineSize = 0, bottomLineSize = 0, opacity = 0.45, texture = "theme",
+        font = "Fonts\\FRIZQT__.TTF", fontStyle = "regular", textShadow = true, roundedCorners = false,
+    },
     warcraftBrown = {
         theme = "warcraftBrown", background = { 1, 1, 1, 1 }, textColor = { 1, 0.82, 0, 1 },
+        opacity = 0.90,
+        popupText = { font = "theme", fontSize = 14 },
         topLine = { 0.48, 0.36, 0.18, 1 }, bottomLine = { 1, 1, 1, 1 },
         topLineSize = 1, bottomLineSize = 4, texture = "theme",
         font = "Fonts\\FRIZQT__.TTF", fontStyle = "regular", textShadow = true, roundedCorners = false,
@@ -89,13 +96,6 @@ Model.Themes = {
         font = "Fonts\\FRIZQT__.TTF", fontStyle = "regular", textShadow = true, roundedCorners = false,
     },
 }
-
-function Model.ApplyTheme(profile, id)
-    local theme = Model.Themes[id]
-    if not theme then return nil, "Unknown bar style" end
-    for key, value in pairs(theme) do profile[key] = Model.DeepCopy(value) end
-    return true
-end
 
 local validBars = { top = true, bottom = true }
 local validPlacements = { top = true, bottom = true, both = true }
@@ -132,24 +132,113 @@ local function color(value, fallback)
     return value
 end
 
+local fontStyles = { regular = true, bold = true, italic = true, bolditalic = true }
+
+local function normalizePopupText(settings)
+    settings = type(settings) == "table" and settings or {}
+    settings.font = nonemptyString(settings.font) and settings.font or "theme"
+    settings.fontStyle = settings.font ~= "theme" and fontStyles[settings.fontStyle] and settings.fontStyle or "regular"
+    settings.fontSize = number(settings.fontSize, 0, 0, 24, true)
+    if settings.fontSize > 0 then settings.fontSize = math.max(8, settings.fontSize) end
+    settings.useCustomColor = settings.useCustomColor == true
+    if type(settings.textColor) == "table" then
+        settings.textColor = color(settings.textColor, { 1, 1, 1, 1 })
+        settings.textColor[4] = 1
+    else
+        settings.textColor = nil
+        settings.useCustomColor = false
+    end
+    return settings
+end
+
+-- Active values stay on the profile for the renderer and widget API. Only
+-- inactive themes need a separate copy, so editing the active theme has one owner.
+local themeTextFields = {
+    font = true, fontSize = true, fontStyle = true, textColor = true, textShadow = true,
+    opacity = true, popupOpacity = true, popupText = true,
+}
+
+local function normalizeThemeText(settings, defaults)
+    settings.font = nonemptyString(settings.font) and settings.font or defaults.font or themeTextDefaults.font
+    settings.fontSize = number(settings.fontSize, defaults.fontSize or themeTextDefaults.fontSize, 8, 48, true)
+    settings.fontStyle = fontStyles[settings.fontStyle] and settings.fontStyle or defaults.fontStyle or themeTextDefaults.fontStyle
+    if type(settings.textShadow) ~= "boolean" then settings.textShadow = defaults.textShadow == true end
+    settings.textColor = color(settings.textColor, defaults.textColor or themeTextDefaults.textColor)
+    settings.opacity = number(settings.opacity, defaults.opacity or themeTextDefaults.opacity, 0, 1)
+    local popupDefault = defaults.popupOpacity or themeTextDefaults.popupOpacity
+    if defaults == legacyProfileDefaults then
+        -- Before popup opacity had its own slider, it followed the bar or was fully opaque.
+        popupDefault = settings.fullOpacityPopups == true and 1 or settings.opacity
+    end
+    settings.popupOpacity = number(settings.popupOpacity, popupDefault, 0, 1)
+    if type(settings.popupText) ~= "table" then
+        settings.popupText = Model.DeepCopy(defaults.popupText or themeTextDefaults.popupText)
+    end
+    settings.popupText = normalizePopupText(settings.popupText)
+end
+
+-- Fresh profiles and Restore to defaults use the same preset as a first visit
+-- to the initial theme. Never give a mutable profile a reference to its preset.
+local initialTheme = Model.Themes[Model.DefaultProfile.theme]
+for key, value in pairs(initialTheme) do Model.DefaultProfile[key] = Model.DeepCopy(value) end
+normalizeThemeText(Model.DefaultProfile, initialTheme)
+
+local function themeTextCopy(settings)
+    local result = {}
+    for key in pairs(themeTextFields) do result[key] = Model.DeepCopy(settings[key]) end
+    return result
+end
+
+local function legacyGlassOpacity(profile)
+    local value = profile.opacityBeforeGlass
+    if profile.theme == "macos27" and type(value) == "number" and value >= 0 and value <= 1 then return value end
+end
+
+function Model.ApplyTheme(profile, id)
+    local theme = Model.Themes[id]
+    if not theme then return nil, "Unknown bar style" end
+    if id ~= profile.theme then
+        local memory = type(profile.themeTextSettings) == "table" and profile.themeTextSettings or {}
+        profile.themeTextSettings = memory
+        if Model.Themes[profile.theme] then memory[profile.theme] = themeTextCopy(profile) end
+        local saved = memory[id]
+        if type(saved) ~= "table" then
+            -- Older Glass profiles remember one shared pre-Glass opacity, but no theme name.
+            saved = { opacity = legacyGlassOpacity(profile) }
+        end
+        normalizeThemeText(saved, theme)
+        for key in pairs(themeTextFields) do profile[key] = saved[key] end
+        memory[id], profile.opacityBeforeGlass = nil, nil
+    end
+    for key, value in pairs(theme) do
+        if not themeTextFields[key] then profile[key] = Model.DeepCopy(value) end
+    end
+    return true
+end
+
 function Model.NormalizeProfile(profile)
     profile = type(profile) == "table" and profile or {}
     local defaults = legacyProfileDefaults
     profile.theme = Model.Themes[profile.theme] and profile.theme or "system7"
     profile.placement = validPlacements[profile.placement] and profile.placement or defaults.placement
     profile.height = number(profile.height, defaults.height, 16, 96, true)
-    profile.font = nonemptyString(profile.font) and profile.font or defaults.font
-    profile.fontSize = number(profile.fontSize, defaults.fontSize, 8, 48, true)
+    normalizeThemeText(profile, defaults)
     -- Outline flags are no longer an appearance option. Weight/slant use real font faces.
     profile.fontFlags = ""
-    local styles = { regular = true, bold = true, italic = true, bolditalic = true }
-    profile.fontStyle = styles[profile.fontStyle] and profile.fontStyle or "regular"
-    profile.textShadow = profile.textShadow == true
+    profile.fullOpacityPopups = nil
+    profile.opacityBeforeGlass = legacyGlassOpacity(profile)
+    local memory = type(profile.themeTextSettings) == "table" and profile.themeTextSettings or {}
+    for id, saved in pairs(memory) do
+        if Model.Themes[id] and id ~= profile.theme and type(saved) == "table" then
+            normalizeThemeText(saved, Model.Themes[id])
+        else
+            memory[id] = nil
+        end
+    end
+    profile.themeTextSettings = memory
     profile.coreMenuBar = validPlacements[profile.coreMenuBar] and profile.coreMenuBar or "both"
     profile.roundedCorners = profile.roundedCorners ~= false
-    profile.opacity = number(profile.opacity, defaults.opacity, 0, 1)
     profile.background = color(profile.background, defaults.background)
-    profile.textColor = color(profile.textColor, defaults.textColor)
     profile.topLine = color(profile.topLine, defaults.topLine)
     profile.bottomLine = color(profile.bottomLine, defaults.bottomLine)
     local legacyLineSize = number(profile.lineSize, 1, 0, 6, true)

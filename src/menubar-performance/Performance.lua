@@ -291,7 +291,7 @@ local function hideIcon(widget)
         local icon = widget[key]
         if object(icon) and type(icon.Hide) == "function" then pcall(icon.Hide, icon) end
     end
-    widget.performanceIconShown, widget.performanceIconTint = nil, nil
+    widget.performanceIconShown, widget.performanceIconTint, widget.performanceIconOutlined = nil, nil, nil
     if widget.performanceIconAnchored then
         widget.performanceIconAnchored = nil
         widget.label:ClearAllPoints()
@@ -350,8 +350,16 @@ local function renderIcon(widget)
         label:ClearAllPoints(); label:SetPoint("LEFT", content, "LEFT", 22, 0)
         widget.performanceIconAnchored = true
     end
+    local profile = Menubar.GetProfile and Menubar:GetProfile()
+    local theme = profile and profile.theme
+    local showOutline = theme ~= "macos8" and theme ~= "macosx"
+    if widget.performanceIconOutlined ~= showOutline then
+        if showOutline then outline:Show() else outline:Hide() end
+        widget.performanceIconOutlined = showOutline
+    end
     if not widget.performanceIconShown then
-        outline:Show(); icon:Show(); widget.performanceIconShown = true
+        icon:Show()
+        widget.performanceIconShown = true
     end
     return 18
 end

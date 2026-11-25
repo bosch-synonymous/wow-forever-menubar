@@ -264,18 +264,40 @@ local function interactionHints(tip, definition, failed)
     tip:AddLine(table.concat(actions, "   "), 0.65, 0.65, 0.65, true)
 end
 
+local function beginTooltip(owner, anchor)
+    local tip = MenubarSkins.Popup and MenubarSkins.Popup.Tooltip() or GameTooltip
+    UI.activeTooltip, UI.tooltipOwner = tip, owner
+    tip:SetOwner(owner, anchor)
+    return tip
+end
+
+local function showTooltip(tip)
+    if MenubarSkins.Popup then MenubarSkins.Popup.Show(tip) else tip:Show() end
+end
+
+function UI:HideWidgetTooltip(owner)
+    if owner and owner ~= self.tooltipOwner then return end
+    local tip = self.activeTooltip
+    if tip and tip:GetOwner() == self.tooltipOwner then tip:Hide() end
+    self.activeTooltip, self.tooltipOwner = nil, nil
+end
+
+function UI:StylePopupLabel(label, muted)
+    if MenubarSkins.Popup then MenubarSkins.Popup.Label(label, muted) end
+end
+
 local function controlTooltip(frame, barName, title, description, action)
     frame:SetScript("OnEnter", function(owner)
-        GameTooltip:SetOwner(owner, barName == "bottom" and "ANCHOR_TOP" or "ANCHOR_BOTTOM")
-        GameTooltip:AddLine(title)
-        GameTooltip:AddLine(description, 1, 1, 1, true)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(leftGesture(mouseGlyph("left")) .. ": " .. action
+        local tip = beginTooltip(owner, barName == "bottom" and "ANCHOR_TOP" or "ANCHOR_BOTTOM")
+        tip:AddLine(title)
+        tip:AddLine(description, 1, 1, 1, true)
+        tip:AddLine(" ")
+        tip:AddLine(leftGesture(mouseGlyph("left")) .. ": " .. action
             .. "   " .. (mouseGlyph("right") or "Right-click") .. ": settings", 0.65, 0.65, 0.65, true)
-        GameTooltip:Show()
+        showTooltip(tip)
     end)
     frame:SetScript("OnLeave", function(owner)
-        if GameTooltip:GetOwner() == owner then GameTooltip:Hide() end
+        UI:HideWidgetTooltip(owner)
     end)
 end
 
@@ -359,6 +381,25 @@ local menuIconShape = {
     { -7, -5, 14, 1 }, { -4, 0, 8, 1 }, { -4, -2, 5, 1 },
 }
 
+-- Classic Mac menus keep their opener selected until the root menu closes.
+local function selectClassicOpener(owner, session)
+    local selection = owner.menuSelection
+    if session then
+        selection = selection or owner:CreateTexture(nil, "ARTWORK")
+        owner.menuSelection = selection
+        selection:SetAllPoints(owner)
+        if Host:GetProfile().theme == "macos8" then selection:SetColorTexture(unpack(MenubarSkins.platinumSelection))
+        else selection:SetColorTexture(0, 0, 0, 1) end
+        selection:Show()
+        for _, part in ipairs(owner.icon) do part:SetColorTexture(1, 1, 1, 1) end
+    else
+        selection:Hide()
+        local r, g, b, a = owner.Label:GetTextColor()
+        for _, part in ipairs(owner.icon) do part:SetColorTexture(r, g, b, a) end
+    end
+    owner.selectedMenuSession = session
+end
+
 local function finite(value)
     return public(value) and type(value) == "number" and value == value and math.abs(value) < math.huge
 end
@@ -390,7 +431,7 @@ local function ownerBar(owner)
     end
 end
 
-local function menuGeometry(owner, bar, name, inset)
+local function menuGeometry(owner, bar, name, inset, insideFrame)
     local screen, source, barRect = frameRect(UIParent), frameRect(owner), frameRect(bar)
     if not screen or not source or not barRect then return end
     local upper, lower = screen.top, screen.bottom
@@ -405,7 +446,8 @@ local function menuGeometry(owner, bar, name, inset)
     -- Native context variants have different artwork outside their frame.
     -- Insets below are content padding, not that external border/shadow.
     local art = { left = 3, right = 3, top = 3, bottom = 4 }
-    if inset.top == 14 and inset.bottom == 14 then art.top = 1
+    if insideFrame then art = { left = 0, right = 0, top = 0, bottom = 0 }
+    elseif inset.top == 14 and inset.bottom == 14 then art.top = 1
     elseif inset.top == 8 and inset.bottom == 15 then art.left, art.right, art.bottom = 10, 10, 3
     elseif inset.top ~= 10 or inset.bottom ~= 10 then
         -- Conservative bounds for the remaining verified shared menu variant.
@@ -454,10 +496,12 @@ local function anchoredMenu(owner, bar, name, generate, token)
         or not MenuVariants or type(MenuVariants.GetDefaultContextMenuMixin) ~= "function" then return end
     local mixin = owner.menuMixin or MenuVariants.GetDefaultContextMenuMixin()
     if not public(mixin) or type(mixin) ~= "table" or type(mixin.GetInset) ~= "function" then return end
+    local styleElement
+    if MenubarSkins.Popup then mixin, styleElement = MenubarSkins.Popup.Menu(mixin) end
     local ok, inset = pcall(mixin.GetInset, mixin)
     if not ok or not public(inset) or type(inset) ~= "table" or not finite(inset.top) or inset.top < 0
         or not finite(inset.bottom) or inset.bottom < 0 then return end
-    local geometry = menuGeometry(owner, bar, name, inset)
+    local geometry = menuGeometry(owner, bar, name, inset, styleElement ~= nil)
     if not geometry then return end
     local manager = Menu.GetManager()
     if not manager or type(manager.OpenMenu) ~= "function" then return end
@@ -470,6 +514,7 @@ local function anchoredMenu(owner, bar, name, generate, token)
         local children = false
         for _, child in root:EnumerateElementDescriptions() do
             children = true
+            if styleElement then child:AddInitializer(styleElement) end
             if not constrain(child, depth + 1) then return false end
         end
         -- All existing bar-provider scroll caps are 400. Apply the same cap to
@@ -480,7 +525,13 @@ local function anchoredMenu(owner, bar, name, generate, token)
     if not constrain(description, 0) then return end
     local session = { manager = manager, clamps = {}, owner = owner, token = token }
     description:AddMenuAcquiredCallback(function(frame)
-        if not session.root then session.root = frame end
+        if not session.root then
+            session.root = frame
+            local theme = Host:GetProfile().theme
+            if owner == bar.menu and (theme == "system7" or theme == "macos8") then
+                selectClassicOpener(owner, session)
+            end
+        end
         local scale = frame:GetEffectiveScale()
         if not finite(scale) or scale <= 0 then return end
         local saved = { frame:GetClampRectInsets() }
@@ -496,6 +547,7 @@ local function anchoredMenu(owner, bar, name, generate, token)
         if saved then frame:SetClampRectInsets(unpack(saved)); session.clamps[frame] = nil end
         if session.root == frame then
             session.root = nil
+            if owner.selectedMenuSession == session then selectClassicOpener(owner, nil) end
             if UI.barMenuSession == session then UI.barMenuSession = nil end
             if UI.contextToken == token then UI.contextToken = nil end
         end
@@ -515,7 +567,7 @@ context = function(owner, generate)
         Host.Print("Context menus are unavailable. Use /menubar for settings.")
         return
     end
-    GameTooltip:Hide()
+    UI:HideWidgetTooltip()
     local bar, name = ownerBar(owner)
     if bar then
         if not anchoredMenu(owner, bar, name, generate, token) then
@@ -675,7 +727,9 @@ function UI:UpdateBars()
     local profile = Host:GetProfile()
     local contentHeight, contentOffset = contentGeometry(profile)
     local controlHeight = math.min(math.max(12, profile.height - 4), contentHeight)
+    local platinum = profile.theme == "macos8" and profile.texture == "solid"
     local aqua = profile.theme == "macosx" and profile.texture == "theme"
+    local glass = profile.theme == "macos27" and profile.texture == "theme"
     for _, name in ipairs({ "top", "bottom" }) do
         local bar = Host.bars[name]
         if not bar then
@@ -772,10 +826,10 @@ function UI:UpdateBars()
         end
         for _, line in ipairs(bar.dither) do line:Hide() end
         for _, band in ipairs(bar.shadingBands) do band:Hide() end
-        if profile.theme == "macos8" or aqua then
-            -- Original Mac-inspired surfaces share a retained, height-bounded pool.
-            -- Aqua paints one layer per row so swatch alpha and bar opacity apply once.
-            for row = 0, profile.height - 1 do
+        if platinum or aqua or glass then
+            -- Platinum leaves a flat silver face between its two stepped edges.
+            local rows = platinum and 2 or profile.height
+            for row = 0, rows - 1 do
                 local band = bar.shadingBands[row + 1]
                 if not band then
                     band = bar.surface:CreateTexture(nil, "BACKGROUND", nil, 1)
@@ -789,11 +843,22 @@ function UI:UpdateBars()
                     band:SetColorTexture((background[1] + (1 - background[1]) * highlight) * shade,
                         (background[2] + (1 - background[2]) * highlight) * shade,
                         (background[3] + (1 - background[3]) * highlight) * shade, background[4])
-                elseif position < 0.5 then
-                    band:SetColorTexture(1, 1, 1, (0.5 - position) * 0.42 * profile.background[4])
-                else band:SetColorTexture(0, 0, 0, (position - 0.5) * 0.26 * profile.background[4]) end
+                elseif glass then
+                    -- A smooth reflected highlight over a transparent tint, without pinstripes.
+                    local highlight = 0.075 * (1 - position) ^ 3
+                    local color = profile.background
+                    band:SetColorTexture(color[1] + (1 - color[1]) * highlight,
+                        color[2] + (1 - color[2]) * highlight,
+                        color[3] + (1 - color[3]) * highlight, color[4])
+                elseif row == 0 then
+                    band:SetColorTexture(1, 1, 1, 0.15 * profile.background[4])
+                else
+                    band:SetColorTexture(0, 0, 0, 0.32 * profile.background[4])
+                end
+                local y = row
+                if platinum then y = row == 0 and profile.topLineSize or profile.height - profile.bottomLineSize - 1 end
                 band:ClearAllPoints()
-                band:SetPoint("TOPLEFT", 0, -row); band:SetPoint("TOPRIGHT", 0, -row)
+                band:SetPoint("TOPLEFT", 0, -y); band:SetPoint("TOPRIGHT", 0, -y)
                 band:SetHeight(1); band:Show()
             end
         end
@@ -824,12 +889,12 @@ function UI:UpdateBars()
         for _, corner in ipairs(bar.corners) do corner:SetShown(profile.roundedCorners) end
         bar.overflow:SetHeight(controlHeight)
         font(bar.menu.Label, 12); font(bar.overflow.Label, 12); font(bar.empty)
-        if not MenubarSkins.IsWarcraft(profile.theme) then
+        if not MenubarSkins.IsWarcraft(profile.theme) and profile.theme ~= "macos27" then
             bar.menu.Label:SetTextColor(0, 0, 0, 1)
             bar.overflow.Label:SetTextColor(0, 0, 0, 1)
         end
         MenubarSkins.Apply(bar, profile)
-        if aqua then bar.background:Hide() end -- Shading rows replace the flat fallback surface.
+        if aqua or glass then bar.background:Hide() end -- Shading rows replace the flat fallback surface.
         local r, g, b, a = bar.menu.Label:GetTextColor()
         for _, region in ipairs(bar.menu.icon) do region:SetColorTexture(r, g, b, a) end
     end
@@ -911,20 +976,20 @@ function UI:CreateWidget(instance, previous)
     widget.frame:EnableMouseWheel(definition and type(definition.mouseWheel) == "function" or false)
     widget.frame:SetScript("OnMouseWheel", function(_, delta) Host:Call(widget, "mouseWheel", delta) end)
     widget.frame:SetScript("OnEnter", function(frame)
-        GameTooltip:SetOwner(frame, Host:EffectiveBar(instance) == "bottom" and "ANCHOR_TOP" or "ANCHOR_BOTTOM")
+        local tip = beginTooltip(frame, Host:EffectiveBar(instance) == "bottom" and "ANCHOR_TOP" or "ANCHOR_BOTTOM")
         if widget.failed then
-            GameTooltip:AddLine("Widget error")
-            GameTooltip:AddLine(widget.failed, 1, 0.5, 0.5, true)
+            tip:AddLine("Widget error")
+            tip:AddLine(widget.failed, 1, 0.5, 0.5, true)
         elseif not definition then
-            GameTooltip:AddLine(instance.type .. " is unavailable")
-            GameTooltip:AddLine("Enable its addon and restart the game. Your settings are kept.", 1, 1, 1, true)
-        else Host:Call(widget, "tooltip", GameTooltip) end
-        GameTooltip:AddLine(" ")
-        interactionHints(GameTooltip, definition, widget.failed)
-        GameTooltip:Show()
+            tip:AddLine(instance.type .. " is unavailable")
+            tip:AddLine("Enable its addon and restart the game. Your settings are kept.", 1, 1, 1, true)
+        else Host:Call(widget, "tooltip", tip) end
+        tip:AddLine(" ")
+        interactionHints(tip, definition, widget.failed)
+        showTooltip(tip)
     end)
     widget.frame:SetScript("OnLeave", function(frame)
-        if GameTooltip:GetOwner() == frame then GameTooltip:Hide() end
+        UI:HideWidgetTooltip(frame)
     end)
     Host.runtime[instance.id] = widget
     if not definition then widget:SetText("[" .. instance.type .. " unavailable]")

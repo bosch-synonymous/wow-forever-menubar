@@ -5,7 +5,9 @@ local root = REPO_ROOT or "."
 local expected = {
     profile = {
         fontSize = 12,
-        opacity = 0.7,
+        opacity = 0.9,
+        popupOpacity = 0.9,
+        popupText = { font = "theme", fontStyle = "regular", fontSize = 14, useCustomColor = false },
         roundedCorners = false,
         spacing = 12,
         background = { 1, 1, 1, 1 },
@@ -445,6 +447,8 @@ check("explicit resets use factory preferences without replacing widget placemen
         f:control("Reset this widget's settings"):Click()
         same(changed.settings, expectedByType[choice[1]].settings, "reset " .. choice[1] .. " settings")
     end
+    MenubarModel.ApplyTheme(f.profile, "macos27")
+    f.profile.fontSize, f.profile.popupText.fontSize, f.profile.popupOpacity = 19, 23, 0.42
     MenubarModel.ApplyTheme(f.profile, "system7")
     f.profile.placement, f.profile.coreMenuBar, f.profile.opacity = "both", "bottom", 0.2
     local before = MenubarModel.DeepCopy(f.character.widgets)
@@ -454,6 +458,11 @@ check("explicit resets use factory preferences without replacing widget placemen
     wanted.placement, wanted.coreMenuBar = "both", "bottom"
     contains(f.profile, wanted, "restored appearance")
     same(f.character.widgets, before, "appearance reset preserves character widgets")
+    assert(MenubarModel.ApplyTheme(f.profile, "macos27"))
+    equal(f.profile.fontSize, 12); equal(f.profile.popupText.fontSize, 0); equal(f.profile.popupOpacity, 0.9)
+    equal(f.profile.opacity, 0.45)
+    assert(MenubarModel.ApplyTheme(f.profile, "system7"))
+    equal(f.profile.opacity, 0.7)
 end)
 
 print(passed .. " production-default integration tests passed")

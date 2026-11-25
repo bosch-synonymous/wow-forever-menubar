@@ -24,14 +24,14 @@ local function equal(actual, expected)
     assert(actual == expected, "expected " .. tostring(expected) .. ", got " .. tostring(actual))
 end
 local styles = {
-    { id = "warcraftBrown", label = "Warcraft Brown" },
-    { id = "warcraftBlack", label = "Warcraft Black" },
-    { id = "warcraftRed", label = "Warcraft Red" },
+    { id = "warcraftBrown", label = "Warcraft Brown", opacity = 0.9, panelSize = 14 },
+    { id = "warcraftBlack", label = "Warcraft Black", opacity = 0.7, panelSize = 0 },
+    { id = "warcraftRed", label = "Warcraft Red", opacity = 0.7, panelSize = 0 },
 }
 
 check("Warcraft presets replace typography and colour without changing layout or character choices", function()
     for _, style in ipairs(styles) do
-        local db, character, profile = Model.Initialize(nil, "A")
+        local db, character, profile = Model.Initialize({ profiles = { Default = { theme = "system7" } } }, "A")
         local instance = Model.AddWidget(db, "A", "time", { zone = "utc" }, { bar = "bottom", alignment = "center" })
         profile.placement, profile.coreMenuBar = "both", "bottom"
         profile.height, profile.padding, profile.spacing = 40, 17, 22
@@ -43,9 +43,11 @@ check("Warcraft presets replace typography and colour without changing layout or
         equal(profile.fontStyle, "regular"); equal(profile.fontFlags, "")
         equal(profile.textShadow, true)
         equal(profile.texture, "theme"); equal(profile.roundedCorners, false)
-        equal(profile.fontSize, 18); equal(profile.height, 40)
+        equal(profile.fontSize, 12); equal(profile.height, 40)
         equal(profile.placement, "both"); equal(profile.coreMenuBar, "bottom")
-        equal(profile.padding, 17); equal(profile.spacing, 22); equal(profile.opacity, 0.4)
+        equal(profile.padding, 17); equal(profile.spacing, 22)
+        equal(profile.opacity, style.opacity); equal(profile.popupOpacity, 0.9)
+        equal(profile.popupText.fontSize, style.panelSize); equal(profile.popupText.font, "theme")
         equal(character.widgets[1], instance)
         equal(instance.bar, "bottom"); equal(instance.alignment, "center"); equal(instance.settings.zone, "utc")
         equal(profile.textColor[1], 1)
@@ -66,12 +68,14 @@ check("saved Warcraft profiles retain user overrides instead of reapplying prese
         profile.textColor = { 0.7, 0.8, 0.9, 1 }
         profile.texture = "Interface\\AddOns\\Custom\\Background.tga"
         profile.bottomLineSize = 3
+        profile.opacity, profile.popupOpacity, profile.popupText.fontSize = 0.7, 0.58, 0
         Model.Initialize(db, "A")
         equal(profile.theme, style.id)
         equal(profile.font, "Custom\\Font.ttf"); equal(profile.fontStyle, "bold")
         equal(profile.textShadow, false); equal(profile.textColor[2], 0.8)
         equal(profile.texture, "Interface\\AddOns\\Custom\\Background.tga")
         equal(profile.bottomLineSize, 3)
+        equal(profile.opacity, 0.7); equal(profile.popupOpacity, 0.58); equal(profile.popupText.fontSize, 0)
     end
 end)
 
@@ -167,8 +171,9 @@ end)
 
 check("Macintosh font presets apply Friz while ordinary rebuilds preserve a chosen font", function()
     for _, style in ipairs({ { id = "system7", label = "Mac OS 7.6 (Harmony)" },
-        { id = "macos8", label = "Mac OS 8 (Platinum)" },
-        { id = "macosx", label = "Mac OS X (Aqua)" } }) do
+        { id = "macos8", label = "Mac OS 8.1 (Platinum)" },
+        { id = "macosx", label = "Mac OS X (Aqua)" },
+        { id = "macos27", label = "macOS 27 (Liquid Glass)" } }) do
         pickStyle(style.label)
         local profile, widget = Menubar:GetProfile(), runtime("theme-clock")
         equal(profile.theme, style.id)
@@ -180,9 +185,12 @@ check("Macintosh font presets apply Friz while ordinary rebuilds preserve a chos
         equal(profile.font, "Fonts\\MORPHEUS.TTF")
         equal(widget.label.font, "Fonts\\MORPHEUS.TTF")
         pickStyle("Warcraft Brown")
-        pickStyle(style.label)
-        equal(profile.font, "Fonts\\FRIZQT__.TTF")
         equal(widget.label.font, "Fonts\\FRIZQT__.TTF")
+        pickStyle(style.label)
+        equal(profile.font, "Fonts\\MORPHEUS.TTF")
+        equal(widget.label.font, "Fonts\\MORPHEUS.TTF")
+        profile.font = "Fonts\\FRIZQT__.TTF"
+        Menubar:Rebuild()
     end
 end)
 
@@ -291,7 +299,7 @@ end)
 check("switching back hides native surfaces and clears text shadows instead of leaking theme state", function()
     pickStyle("Warcraft Red")
     local bar = Menubar.bars.bottom
-    pickStyle("Mac OS 8 (Platinum)")
+    pickStyle("Mac OS 8.1 (Platinum)")
     for _, owner in ipairs({ bar, bar.menu, bar.overflow }) do
         for _, value in ipairs(textures(owner.warcraftSkin)) do assert(not value:IsShown()) end
     end
@@ -321,7 +329,7 @@ check("switching back hides native surfaces and clears text shadows instead of l
 end)
 
 check("repeated style changes reuse textures and frames after the first complete cycle", function()
-    local cycle = { "Warcraft Brown", "Warcraft Black", "Warcraft Red", "Mac OS 8 (Platinum)", "Mac OS X (Aqua)", "Mac OS 7.6 (Harmony)" }
+    local cycle = { "Warcraft Brown", "Warcraft Black", "Warcraft Red", "Mac OS 8.1 (Platinum)", "Mac OS X (Aqua)", "Mac OS 7.6 (Harmony)" }
     for _, style in ipairs(cycle) do pickStyle(style) end
     local bar = Menubar.bars.bottom
     local body, bottom = bar.warcraftSkin.body, bar.warcraftSkin.bottom.middle
@@ -335,7 +343,7 @@ check("the bare menu glyph follows theme contrast without backgrounds borders or
     local profile = Menubar:GetProfile()
     profile.placement, profile.coreMenuBar, profile.opacity = "both", "both", 0
     local icons = {}
-    for _, theme in ipairs({ "system7", "macos8", "macosx", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
+    for _, theme in ipairs({ "system7", "macos8", "macosx", "macos27", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
         assert(Model.ApplyTheme(profile, theme)); Menubar:Rebuild()
         for name, bar in pairs(Menubar.bars) do
             assert(bar.menu:IsShown()); assert(not bar.menu.Label:IsShown())
@@ -369,6 +377,7 @@ end)
 
 check("Mac OS X is selectable with dark Friz text while preserving user sizing opacity and layout", function()
     local profile = Menubar:GetProfile()
+    pickStyle("Mac OS X (Aqua)")
     profile.fontSize, profile.opacity, profile.height = 18, 0.37, 32
     profile.placement, profile.coreMenuBar = "both", "bottom"
     pickStyle("Warcraft Red"); pickStyle("Mac OS X (Aqua)")
@@ -419,11 +428,11 @@ check("Aqua shading reuses a bounded pool across heights and other themes withou
                             assert(index <= height, "Rows outside the current height must be hidden")
                             assert(band:GetTop() <= bar:GetTop() + 0.000001)
                             assert(band:GetBottom() >= bar:GetBottom() - 0.000001)
-                            if lastBottom then equal(band:GetTop(), lastBottom) end
+                            if theme == "macosx" and lastBottom then equal(band:GetTop(), lastBottom) end
                             lastBottom = band:GetBottom()
                         end
                     end
-                    equal(active, (theme == "macosx" or theme == "macos8") and height or 0)
+                    equal(active, theme == "macosx" and height or theme == "macos8" and 2 or 0)
                 end
                 equal(textureCount, texturesBefore); equal(#Stub.frames, framesBefore)
             end
@@ -466,6 +475,39 @@ check("Aqua style texture can be restored after solid fine-line and custom overr
     end
     pattern("Style texture"); assertShading(true)
     for _, bar in pairs(Menubar.bars) do equal(bar.background.texture, nil) end
+end)
+
+check("Liquid Glass is translucent with readable chrome on both bars and restores cleanly", function()
+    local profile = Menubar:GetProfile()
+    pickStyle("Mac OS 7.6 (Harmony)")
+    profile.opacity, profile.popupOpacity, profile.placement = 0.75, 0.84, "both"
+    pickStyle("macOS 27 (Liquid Glass)")
+    equal(profile.theme, "macos27"); equal(profile.opacity, 0.45); equal(profile.popupOpacity, 0.90)
+    equal(profile.font, "Fonts\\FRIZQT__.TTF")
+    assert(profile.background[4] > 0 and profile.background[4] < 1)
+    for _, bar in pairs(Menubar.bars) do
+        assert(not bar.background:IsShown()); assert(not bar.overflow.background:IsShown())
+        equal(bar.surface:GetAlpha(), 0.45)
+        assert(not bar.topLine:IsShown() and not bar.bottomLine:IsShown())
+        equal(bar.menu.icon[1].color[1], 1); equal(bar.overflow.Label.textColor[1], 1)
+        local last = math.huge
+        for index = 1, profile.height do
+            local band = bar.shadingBands[index]
+            assert(band:IsShown()); assert(band.color[1] < last)
+            equal(band.color[4], profile.background[4])
+            last = band.color[1]
+        end
+    end
+    profile.opacity, profile.popupOpacity = 0.31, 0.72
+    Model.NormalizeProfile(profile)
+    equal(profile.opacity, 0.31)
+    pickStyle("Mac OS 7.6 (Harmony)")
+    equal(profile.opacity, 0.75); equal(profile.opacityBeforeGlass, nil); equal(profile.popupOpacity, 0.84)
+    for _, bar in pairs(Menubar.bars) do
+        assert(bar.background:IsShown()); assert(bar.overflow.background:IsShown())
+        for _, band in ipairs(bar.shadingBands) do assert(not band:IsShown()) end
+        equal(bar.menu.icon[1].color[1], 0)
+    end
 end)
 
 print(passed .. " bar theme tests passed")

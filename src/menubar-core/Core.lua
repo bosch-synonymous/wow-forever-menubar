@@ -2,7 +2,7 @@
 
 local Model, Layout = MenubarModel, MenubarLayout
 
-local Menubar = { NativeStatusBars = MenubarNativeStatusBars, API_VERSION = 1, VERSION = "0.11.30", CAPABILITIES = {
+local Menubar = { NativeStatusBars = MenubarNativeStatusBars, API_VERSION = 1, VERSION = "0.12.14", CAPABILITIES = {
     directClick = true, guardedCallbacks = true, retainedContexts = true, eventOnly = true,
 }, types = {}, runtime = {}, dormant = {}, bars = {} }
 
@@ -669,11 +669,7 @@ function Menubar:RebuildNow()
         if self.UI.CloseBarMenu then self.UI:CloseBarMenu() end
         self.UI.contextToken = nil
         if self.pendingDefaults then self.pendingDefaults = nil; self:EnsureDefaults() end
-        if GameTooltip and GameTooltip:GetOwner() then
-            for _, widget in pairs(self.runtime) do
-                if GameTooltip:GetOwner() == widget.frame then GameTooltip:Hide(); break end
-            end
-        end
+        if self.UI.HideWidgetTooltip then self.UI:HideWidgetTooltip() end
         local previous = self.runtime
         for _, widget in pairs(previous) do widget.frame:Hide() end
         self.runtime = {}

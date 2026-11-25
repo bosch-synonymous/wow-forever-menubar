@@ -26,6 +26,17 @@ local function key(path)
     return path:lower():gsub("/", "\\")
 end
 
+-- Some clients return no result from SetFont. The font probe and our own
+-- popup fonts can confirm that the requested asset actually took effect.
+function Fonts.TrySetFont(object, path, size, flags)
+    local ok, result = pcall(object.SetFont, object, path, size, flags)
+    if not ok or result == false then return false end
+    if result == true then return true end
+    local applied, height = object:GetFont()
+    return type(applied) == "string" and key(applied) == key(path)
+        and type(height) == "number" and math.abs(height - size) < 0.1
+end
+
 local function entry(name, regular, faces)
     name, regular = clean(name), clean(regular)
     if not name then return nil, "Enter a font name." end
@@ -81,7 +92,7 @@ function Fonts.AddCustom(db, name, regular, faces)
     return selected
 end
 
-function Fonts.Options(customFonts, currentFile)
+function Fonts.Options(customFonts, currentFile, otherFile)
     local options, known, candidates = {}, {}, {}
     local function add(path, name, group)
         path, name = clean(path), clean(name)
@@ -103,7 +114,9 @@ function Fonts.Options(customFonts, currentFile)
         local ok, names = pcall(GetFonts)
         if ok and type(names) == "table" then
             local ordered = {}
-            for _, name in pairs(names) do if clean(name) then ordered[#ordered + 1] = name end end
+            for _, name in pairs(names) do
+                if clean(name) and not name:match("^MenubarPopupFont%d+$") then ordered[#ordered + 1] = name end
+            end
             table.sort(ordered)
             for _, name in ipairs(ordered) do
                 local object = _G[name]
@@ -113,10 +126,14 @@ function Fonts.Options(customFonts, currentFile)
             end
         end
     end
-    currentFile = clean(currentFile)
-    if currentFile and not known[key(currentFile)] and not candidates[key(currentFile)] then
-        candidates[key(currentFile)] = { name = currentFile .. " (current)", regular = currentFile }
+    local function includeCurrent(path)
+        path = clean(path)
+        if path and not known[key(path)] and not candidates[key(path)] then
+            candidates[key(path)] = { name = path .. " (current)", regular = path }
+        end
     end
+    includeCurrent(currentFile)
+    includeCurrent(otherFile)
     local sorted = {}
     for _, selected in pairs(candidates) do sorted[#sorted + 1] = selected end
     table.sort(sorted, function(a, b)

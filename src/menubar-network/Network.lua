@@ -40,20 +40,22 @@ local function reset(widget)
     end
 end
 
-local function prepareIcon(widget, key, readyKey, layer, filename)
+local function prepareIcon(widget, key, fileKey, layer, filename)
     local region = widget[key]
     if not region then
         region = widget.frame:CreateTexture(nil, layer)
         widget[key] = region -- Retain it before any native setup can fail.
     end
-    if not widget[readyKey] then
+    if widget[fileKey] ~= filename then
+        widget[fileKey] = nil
         region:Hide()
         region:ClearAllPoints()
         region:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", 4, 0)
         local accepted = region:SetTexture(media .. filename)
         if type(issecretvalue) == "function" and issecretvalue(accepted) then return false end
         if accepted ~= true then return false end
-        widget[readyKey] = true
+        widget[fileKey] = filename
+        widget.networkIconHeight = nil
     end
     return true
 end
@@ -75,25 +77,36 @@ local function update(widget)
         widget:SetText(text)
         return
     end
-    if not prepareIcon(widget, "networkOutline", "networkOutlineReady", "ARTWORK", "network-outline.tga")
-        or not prepareIcon(widget, "networkIcon", "networkIconReady", "OVERLAY", "network.tga") then
+    local profile = Menubar.ready and Menubar.GetProfile and Menubar:GetProfile()
+    local theme = profile and profile.theme
+    local harmony = theme == "system7"
+    local wifi = theme == "macosx" or theme == "macos27"
+    local outlined = not harmony and not wifi and theme ~= "macos8"
+    local filename = harmony and "network-harmony.tga" or wifi and "network-wifi.tga" or "network.tga"
+    if (outlined and not prepareIcon(widget, "networkOutline", "networkOutlineFile", "ARTWORK", "network-outline.tga"))
+        or not prepareIcon(widget, "networkIcon", "networkIconFile", "OVERLAY", filename) then
         reset(widget)
         widget:SetText(text)
         return
     end
     local iconHeight = widget.content and math.min(14, widget.content:GetHeight()) or 14
     if widget.networkIconHeight ~= iconHeight then
-        widget.networkOutline:SetSize(iconHeight, iconHeight)
+        if widget.networkOutline then widget.networkOutline:SetSize(iconHeight, iconHeight) end
         widget.networkIcon:SetSize(iconHeight, iconHeight)
         widget.networkIconHeight = iconHeight
     end
     local r, g, b, a = widget.label:GetTextColor()
     if not validNumber(r) or not validNumber(g) or not validNumber(b) or not validNumber(a)
         or r > 1 or g > 1 or b > 1 or a > 1 then r, g, b, a = 1, 1, 1, 1 end
-    if widget.networkR ~= r or widget.networkG ~= g or widget.networkB ~= b or widget.networkA ~= a then
-        local edge = (0.2126 * r + 0.7152 * g + 0.0722 * b) >= 0.5 and 0 or 1
+    if harmony then r, g, b = 1, 1, 1 end -- Preserve its indexed colours.
+    if widget.networkR ~= r or widget.networkG ~= g or widget.networkB ~= b or widget.networkA ~= a
+        or widget.networkOutlined ~= outlined then
         widget.networkIcon:SetVertexColor(r, g, b, a)
-        widget.networkOutline:SetVertexColor(edge, edge, edge, a)
+        if outlined then
+            local edge = (0.2126 * r + 0.7152 * g + 0.0722 * b) >= 0.5 and 0 or 1
+            widget.networkOutline:SetVertexColor(edge, edge, edge, a)
+        end
+        widget.networkOutlined = outlined
         widget.networkR, widget.networkG, widget.networkB, widget.networkA = r, g, b, a
     end
     widget:SetText(text) -- Semantic text remains plain for overflow and tooltips.
@@ -106,7 +119,7 @@ local function update(widget)
         widget.label:ClearAllPoints()
         widget.label:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", 22, 0)
     end
-    widget.networkOutline:Show()
+    if widget.networkOutline then widget.networkOutline:SetShown(outlined) end
     widget.networkIcon:Show()
 end
 

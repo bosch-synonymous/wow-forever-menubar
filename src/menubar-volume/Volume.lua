@@ -66,8 +66,11 @@ local function render(widget)
         speaker:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", 4, 0)
         widget.volumeIconReady = true
     end
-    speaker:SetTexture(media .. icon(volume, enabled) .. ".tga")
-    speaker:SetVertexColor(widget.label:GetTextColor())
+    local state = icon(volume, enabled)
+    if not (Menubar.ApplyThemeIcon and Menubar:ApplyThemeIcon(speaker, "volume-" .. state, widget.label)) then
+        speaker:SetTexture(media .. state .. ".tga")
+        speaker:SetVertexColor(widget.label:GetTextColor())
+    end
     speaker:Show()
     -- Keep the host's font and shadow, and reserve the icon alongside the percentage.
     widget.label:SetText(value)
@@ -148,6 +151,19 @@ local function currentOwner(widget, settings, instance, database)
     return type(runtime) ~= "table" or runtime[widget.id] == widget
 end
 
+local function percentageLabel(frame, ui, muted, text)
+    local label = frame:AttachFontString()
+    label:SetFontObject(muted and "GameFontDisableSmall" or "GameFontHighlightSmall")
+    if ui and type(ui.StylePopupLabel) == "function" then ui:StylePopupLabel(label, muted) end
+    -- Blizzard attaches these as 150-wide, one-line regions. Measure the
+    -- chosen font at its natural size before assigning a rectangle.
+    label:SetSize(0, 0)
+    label:SetJustifyH("CENTER"); label:SetJustifyV("MIDDLE")
+    label:SetWordWrap(false)
+    label:SetText(text)
+    return label
+end
+
 local function contextMenu(widget, root, forceVertical)
     local settings, instance, database = widget.settings, widget.instance, Menubar.db
     if not currentOwner(widget, settings, instance, database) then return end
@@ -170,7 +186,34 @@ local function contextMenu(widget, root, forceVertical)
     local element = root:CreateFrame()
     element:AddInitializer(function(frame)
         if not active() then return end
-        local width, height = vertical and 76 or 230, vertical and 152 or 52
+        local valueLabel = percentageLabel(frame, ui, false, "100%")
+        local low = percentageLabel(frame, ui, true, "0%")
+        local high = percentageLabel(frame, ui, true, "100%")
+        local valueWidth = valueLabel:GetStringWidth()
+        -- A proportional font can make a two-digit percentage wider than 100%.
+        for digit = 1, 9 do
+            valueLabel:SetText((digit * 11) .. "%")
+            valueWidth = math.max(valueWidth, valueLabel:GetStringWidth())
+        end
+        valueWidth = math.max(36, math.ceil(valueWidth) + 4)
+        local valueHeight = math.max(14, math.ceil(valueLabel:GetStringHeight()) + 2)
+        local endWidth = math.max(32, math.ceil(math.max(low:GetStringWidth(), high:GetStringWidth())) + 4)
+        local endHeight = math.max(12, math.ceil(math.max(low:GetStringHeight(), high:GetStringHeight())))
+        valueLabel:SetSize(valueWidth, valueHeight)
+        low:SetSize(endWidth, endHeight); high:SetSize(endWidth, endHeight)
+
+        local length, width, height, sliderX, sliderY
+        if vertical then
+            length = 104
+            sliderX = math.ceil(endWidth / 2) + 4
+            sliderY = math.max(24, endHeight + 8)
+            width = sliderX + 16 + valueWidth + 4
+            height = length + 2 * sliderY
+        else
+            length = math.max(200, 2 * endWidth + 8)
+            width = math.max(length + 30, valueWidth + 8)
+            height = 26 + endHeight + valueHeight
+        end
         frame:SetSize(width, height)
         local slider = frame:AttachFrame("Slider")
         -- The compositor resets attached frames to native defaults. A Slider
@@ -184,8 +227,8 @@ local function contextMenu(widget, root, forceVertical)
         slider:SetAlpha(1)
         slider:SetEnabled(true)
         slider:SetOrientation(vertical and "VERTICAL" or "HORIZONTAL")
-        slider:SetSize(vertical and 20 or 200, vertical and 104 or 20)
-        if vertical then slider:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -24)
+        slider:SetSize(vertical and 20 or length, vertical and length or 20)
+        if vertical then slider:SetPoint("TOPLEFT", frame, "TOPLEFT", sliderX - 10, -sliderY)
         else slider:SetPoint("TOP", frame, "TOP", 0, -2) end
         slider:SetMinMaxValues(0, 100)
         slider:SetValueStep(1)
@@ -196,28 +239,13 @@ local function contextMenu(widget, root, forceVertical)
         local track = slider:AttachTexture()
         track:SetAtlas("_Minimal_SliderBar_Middle")
         track:SetPoint("CENTER")
-        track:SetSize(vertical and 104 or 200, 8)
+        track:SetSize(length, 8)
         track:SetRotation(vertical and math.pi / 2 or 0)
         track:SetDrawLayer("BACKGROUND")
         local thumb = slider:AttachTexture()
         thumb:SetAtlas("Minimal_SliderBar_Button", true)
         slider:SetThumbTexture(thumb)
 
-        local valueLabel = frame:AttachFontString()
-        valueLabel:SetFontObject("GameFontHighlightSmall")
-        -- Managed font strings start 150 units wide and left-justified.
-        -- Give each label its own rectangle instead of inheriting that row.
-        valueLabel:SetSize(36, 14)
-        valueLabel:SetJustifyH("CENTER"); valueLabel:SetJustifyV("MIDDLE")
-        valueLabel:SetWordWrap(false)
-        local low = frame:AttachFontString()
-        local high = frame:AttachFontString()
-        low:SetFontObject("GameFontDisableSmall")
-        high:SetFontObject("GameFontDisableSmall")
-        low:SetSize(32, 12); high:SetSize(32, 12)
-        low:SetJustifyH("CENTER"); high:SetJustifyH("CENTER")
-        low:SetJustifyV("MIDDLE"); high:SetJustifyV("MIDDLE")
-        low:SetWordWrap(false); high:SetWordWrap(false)
         if vertical then
             valueLabel:SetPoint("LEFT", slider, "RIGHT", 6, 0)
             high:SetPoint("BOTTOM", slider, "TOP", 0, 6)
@@ -227,8 +255,6 @@ local function contextMenu(widget, root, forceVertical)
             low:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -2)
             high:SetPoint("TOPRIGHT", slider, "BOTTOMRIGHT", 0, -2)
         end
-        low:SetText("0%")
-        high:SetText("100%")
 
         local syncing = true
         local function sync()

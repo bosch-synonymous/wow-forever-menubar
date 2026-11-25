@@ -1,7 +1,7 @@
 local root = REPO_ROOT or "."
 local Stub = dofile(root .. "/tests/wow_stub.lua")
 Stub.Install()
-for _, file in ipairs({ "Model.lua", "Identity.lua", "Fonts.lua", "Layout.lua", "Gauge.lua", "Skins.lua", "Core.lua", "UI.lua", "Settings.lua" }) do
+for _, file in ipairs({ "Model.lua", "Identity.lua", "Fonts.lua", "Layout.lua", "Gauge.lua", "Skins.lua", "PopupSkin.lua", "Core.lua", "UI.lua", "Settings.lua" }) do
     dofile(root .. "/src/menubar-core/" .. file)
 end
 if MENUBAR_TIME_ROOT then dofile(MENUBAR_TIME_ROOT .. "/src/menubar-time/Time.lua") end
@@ -187,15 +187,93 @@ check("integer steppers enforce limits and typed numbers remain validated", func
     equal(Menubar.bars.bottom:GetHeight(), 32)
 end)
 
+check("panel font size steps between the theme and whole sizes with arrows, wheel and direct entry", function()
+    local caption = "Panel font size"
+    local profile = Menubar:GetProfile()
+    local barSize = profile.fontSize
+    local field = control(caption, "number")
+    local function expect(size, label)
+        equal(profile.popupText.fontSize, size)
+        equal(field.edit:GetText(), label or tostring(size))
+        equal(profile.fontSize, barSize)
+        equal(field.down:IsEnabled(), size ~= 0)
+        equal(field.up:IsEnabled(), size ~= 24)
+    end
+    local function wheel(target, delta)
+        assert(target.mouseWheelEnabled)
+        target:GetScript("OnMouseWheel")(target, delta)
+    end
+    expect(0, "Theme default")
+    local redraw, rebuild = Menubar.UI.Redraw, Menubar.Rebuild
+    Menubar.UI.Redraw = function() error("Changing panel size should keep the control live") end
+    Menubar.Rebuild = function() error("Changing panel size should keep the bar live") end
+    wheel(field.edit, 1); expect(8)
+    wheel(field.up, 1); expect(9)
+    wheel(field.down, -1); expect(8)
+    wheel(field, -1); expect(0, "Theme default")
+    wheel(field, -1); expect(0, "Theme default")
+    click(field.up); expect(8)
+    click(field.down); expect(0, "Theme default")
+    enter(caption, "24"); expect(24)
+    wheel(field, 1); expect(24)
+    click(field.down); expect(23)
+    enter(caption, "14"); expect(14)
+    for _, invalid in ipairs({ "7", "25", "13.5", "bad" }) do
+        enter(caption, invalid); expect(14)
+    end
+    field.edit:SetText("23")
+    field.edit:GetScript("OnEscapePressed")(field.edit); expect(14)
+    for _, delta in ipairs({ 0, 0 / 0, math.huge, -math.huge }) do
+        wheel(field.edit, delta); expect(14)
+    end
+    local originalSecret, secret = issecretvalue, {}
+    issecretvalue = function(value) return rawequal(value, secret) or (originalSecret and originalSecret(value)) end
+    wheel(field, secret); expect(14)
+    issecretvalue = originalSecret
+    for _, reset in ipairs({ "0", "", "Theme default" }) do
+        enter(caption, reset); expect(0, "Theme default")
+        enter(caption, "14"); expect(14)
+    end
+    Menubar.UI.Redraw, Menubar.Rebuild = redraw, rebuild
+    local oldWheel = field.edit:GetScript("OnMouseWheel")
+    Menubar.UI:OpenWidget("w1")
+    oldWheel(field.edit, -1)
+    equal(profile.popupText.fontSize, 14)
+    Menubar.UI:OpenSettings()
+    field = control(caption, "number")
+    expect(14)
+    enter(caption, "0"); expect(0, "Theme default")
+end)
+
 check("background opacity uses a live native slider while keeping the bar and controls opaque", function()
-    local original = control("Background opacity", "slider")
+    local popupOpacity = Menubar:GetProfile().popupOpacity
+    local original = control("Bar opacity", "slider")
     equal(original.slider.template, "MinimalSliderTemplate")
     Stub.DragSlider(original.slider, 37)
     equal(Menubar:GetProfile().opacity, 0.37)
     equal(Menubar.bars.bottom:GetAlpha(), 1)
     equal(Menubar.bars.bottom.surface:GetAlpha(), 0.37)
     equal(Menubar.bars.bottom.menu:GetEffectiveAlpha(), 1)
-    equal(control("Background opacity"), original)
+    equal(Menubar:GetProfile().popupOpacity, popupOpacity)
+    equal(control("Bar opacity"), original)
+end)
+
+check("menu and tooltip opacity has its own native slider and preserves the bar opacity", function()
+    local profile = Menubar:GetProfile()
+    local opacity = profile.opacity
+    local popup = control("Menu and tooltip opacity", "slider")
+    equal(popup.slider.template, "MinimalSliderTemplate")
+    local rebuild = Menubar.Rebuild
+    Menubar.Rebuild = function() error("Dragging the popup slider should not rebuild the bar") end
+    for _, percent in ipairs({ 0, 100, 82 }) do
+        Stub.DragSlider(popup.slider, percent)
+        equal(profile.popupOpacity, percent / 100)
+        equal(control("Menu and tooltip opacity", "slider").slider:GetValue(), percent)
+        equal(control("Bar opacity", "slider").slider:GetValue(), 37)
+        equal(profile.opacity, opacity)
+        equal(Menubar.bars.bottom.surface:GetAlpha(), opacity)
+    end
+    Menubar.Rebuild = rebuild
 end)
 
 check("native colour picker previews RGB and alpha and cancellation restores the original", function()
@@ -309,27 +387,83 @@ check("custom fonts register from form contents and use actual bold and italic f
     assert(#options >= 5)
 end)
 
-check("Platinum style applies matching typography and reuses shading while preserving size opacity and layout", function()
+check("panel text controls set a real font face and RGB independently of the bar", function()
     local profile = Menubar:GetProfile()
-    local oldSize = profile.fontSize
-    local oldOpacity, oldHeight, oldPlacement = profile.opacity, profile.height, profile.placement
+    local barPath, barSize = Menubar.runtime.w1.label:GetFont()
+    local nativeColour = { control("Panel font").Label:GetTextColor() }
+    pick("Panel font", "My custom family")
+    pick("Panel font style", "Bold")
+    equal(profile.popupText.font, "Custom\\Regular.ttf")
+    equal(profile.popupText.fontStyle, "bold")
+    enter("Panel font size", "18")
+    equal(profile.popupText.fontSize, 18)
+    click(control("Use custom panel text colour", "toggle"))
+    click(control("Panel text colour", "color"))
+    assert(ColorPickerFrame:IsShown() and not ColorPickerFrame.info.hasOpacity)
+    ColorPickerFrame:SetColorRGB(0.12, 0.21, 0.49)
+    equal(profile.popupText.textColor[1], 0.12); equal(profile.popupText.textColor[4], 1)
+    ColorPickerFrame:Hide()
+    local path, size = Menubar.runtime.w1.label:GetFont()
+    equal(path, barPath); equal(size, barSize)
+    equal(control("Panel font").Label.fontObject, GameFontHighlight)
+    equal(control("Panel font").Label:GetTextColor(), nativeColour[1])
+    click(control("Register panel font..."))
+    control("Font name"):SetText("Panel family")
+    control("Regular font file"):SetText("Custom\\Panel.ttf")
+    click(control("Register and select font"))
+    equal(profile.popupText.font, "Custom\\Panel.ttf")
+    equal(Menubar.runtime.w1.label:GetFont(), barPath)
+    pick("Panel font", "Theme default")
+    enter("Panel font size", "Theme default")
+    click(control("Use custom panel text colour", "toggle"))
+    equal(profile.popupText.font, "theme"); equal(profile.popupText.fontSize, 0)
+    for _, row in ipairs(Menubar.UI.window.controls) do
+        assert(row.caption ~= "Panel font style" and row.caption ~= "Panel text colour")
+    end
+end)
+
+check("switching themes restores the active font and opacity controls while reusing Platinum shading", function()
+    local profile, bar = Menubar:GetProfile(), Menubar.bars.bottom
+    local oldHeight, oldPlacement = profile.height, profile.placement
     local firstWidget, firstSettings = character().widgets[1], character().widgets[1].settings
-    pick("Bar style", "Mac OS 8 (Platinum)")
-    equal(profile.theme, "macos8")
-    equal(profile.font, "Fonts\\FRIZQT__.TTF"); equal(profile.fontStyle, "regular"); equal(profile.fontSize, oldSize)
-    equal(profile.textShadow, false)
-    equal(profile.opacity, oldOpacity); equal(profile.height, oldHeight); equal(profile.placement, oldPlacement)
-    equal(character().widgets[1], firstWidget); equal(character().widgets[1].settings, firstSettings)
-    local bar = Menubar.bars.bottom
-    equal(#bar.shadingBands, profile.height)
+    local function expect(font, panelFont, size, panelSize, opacity, popupOpacity)
+        equal(control("Font").Label:GetText(), font)
+        equal(control("Panel font").Label:GetText(), panelFont)
+        equal(control("Font size").edit:GetText(), tostring(size))
+        equal(control("Panel font size").edit:GetText(), panelSize == 0 and "Theme default" or tostring(panelSize))
+        equal(control("Bar opacity").slider:GetValue(), opacity)
+        equal(control("Menu and tooltip opacity").slider:GetValue(), popupOpacity)
+        equal(profile.fontSize, size); equal(profile.popupText.fontSize, panelSize)
+        equal(bar.surface:GetAlpha(), opacity / 100); equal(profile.popupOpacity, popupOpacity / 100)
+        equal(profile.height, oldHeight); equal(profile.placement, oldPlacement)
+        equal(character().widgets[1], firstWidget); equal(character().widgets[1].settings, firstSettings)
+    end
+    pick("Panel font", "Panel family")
+    enter("Font size", "14"); enter("Panel font size", "13")
+    Stub.DragSlider(control("Bar opacity").slider, 25)
+    Stub.DragSlider(control("Menu and tooltip opacity").slider, 50)
+
+    pick("Bar style", "Mac OS 8.1 (Platinum)")
+    equal(profile.theme, "macos8"); equal(profile.fontStyle, "regular"); equal(profile.textShadow, false)
+    expect("Friz Quadrata", "Theme default", 12, 0, 70, 90)
+    equal(#bar.shadingBands, 2)
     local firstBand, count = bar.shadingBands[1], #bar.shadingBands
     assert(firstBand:IsShown())
     assert(firstBand.color[1] > bar.shadingBands[count].color[1])
+    equal(firstBand:GetTop(), bar:GetTop() - profile.topLineSize)
+    equal(bar.shadingBands[count]:GetBottom(), bar:GetBottom() + profile.bottomLineSize)
+    pick("Font", "Arial Narrow"); pick("Panel font", "Morpheus")
+    enter("Font size", "18"); enter("Panel font size", "16")
+    Stub.DragSlider(control("Bar opacity").slider, 50)
+    Stub.DragSlider(control("Menu and tooltip opacity").slider, 75)
+
     pick("Bar style", "Mac OS 7.6 (Harmony)")
+    expect("My custom family", "Panel family", 14, 13, 25, 50)
+    equal(control("Font style").Label:GetText(), "Italic")
     for _, band in ipairs(bar.shadingBands) do assert(not band:IsShown()) end
-    pick("Bar style", "Mac OS 8 (Platinum)")
+    pick("Bar style", "Mac OS 8.1 (Platinum)")
+    expect("Arial Narrow", "Morpheus", 18, 16, 50, 75)
     equal(bar.shadingBands[1], firstBand); equal(#bar.shadingBands, count)
-    equal(profile.font, "Fonts\\FRIZQT__.TTF"); equal(profile.opacity, oldOpacity)
     pick("Bar style", "Mac OS 7.6 (Harmony)")
 end)
 
@@ -417,7 +551,14 @@ check("appearance copies remain independent while character widgets stay intact"
     equal(#character().widgets, count)
     local copied = Menubar:GetProfile()
     assert(copied ~= previous and copied.background ~= previous.background)
+    local previousPopupOpacity = previous.popupOpacity
+    Stub.DragSlider(control("Menu and tooltip opacity", "slider").slider, 64)
+    equal(copied.popupOpacity, 0.64)
+    copied.popupText.fontSize, copied.popupText.useCustomColor = 22, true
     click(control("Restore to defaults"))
+    equal(copied.popupText.fontSize, 14); equal(copied.popupText.useCustomColor, false)
+    equal(copied.popupOpacity, 0.90)
+    equal(previous.popupOpacity, previousPopupOpacity)
     equal(copied.font, MenubarModel.DefaultProfile.font)
     equal(copied.placement, "bottom")
     equal(previous.font, previousFont)

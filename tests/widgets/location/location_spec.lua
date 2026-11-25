@@ -53,6 +53,38 @@ test("default zone coordinates and classification are visible", function()
     equal(provider.interval, 0.5)
     equal(render(), "Elwynn Forest (12.3, 56.8) [|cff287A36Friendly|r]")
 end)
+test("Friendly uses a pale green on dark surfaces and honours custom backgrounds", function()
+    local profile = { theme = "macos27", texture = "theme", background = { 0.055, 0.07, 0.09, 0.86 },
+        opacity = 0.45, textColor = { 1, 1, 1, 1 } }
+    Menubar.GetProfile = function() return profile end
+    local previousSkins = MenubarSkins
+    MenubarSkins = { IsWarcraft = function(theme) return theme == "warcraftBrown" end }
+    local function expected(green)
+        equal(render({ showCoordinates = false }), "Elwynn Forest [|cff" .. green .. "Friendly|r]")
+    end
+    expected("8BE99A")
+    profile.theme, profile.background = "macosx", { 0.94, 0.95, 0.96, 1 }
+    expected("287A36")
+    profile.theme, profile.background = "warcraftBrown", { 1, 1, 1, 1 }
+    expected("8BE99A")
+    profile.texture = "solid" -- A white swatch is the surface itself here.
+    expected("287A36")
+    profile.background = { 0, 0, 0, 1 }
+    expected("8BE99A")
+    profile.texture = "Custom\\Background.tga"
+    expected("8BE99A")
+    profile.textColor = { 0, 0, 0, 1 }
+    expected("287A36")
+    profile.texture, profile.opacity = "solid", 0
+    expected("287A36")
+    profile.textColor = { 1, 1, 1, 1 }
+    expected("8BE99A")
+    kind = "hostile"
+    equal(render({ showCoordinates = false }), "Elwynn Forest [|cffB02020Enemy|r]")
+    kind = "friendly"
+    Menubar.GetProfile, MenubarSkins = nil, previousSkins
+end)
+
 test("zone subzone and combined names are selectable", function()
     equal(render({ name = "subzone", showCoordinates = false, showStatus = false }), "Goldshire")
     equal(render({ name = "both", showCoordinates = false, showStatus = false }), "Elwynn Forest: Goldshire")
@@ -94,7 +126,7 @@ test("unknown classifications remain on the bar but their tooltip row is omitted
     end
     kind = "friendly"
 end)
-test("a missing dungeon map does not invent coordinates", function()
+test("an unavailable world map does not invent coordinates", function()
     mapID = nil
     equal(render({ showStatus = false }), "Elwynn Forest (--, --)")
     local _, widget = render()
@@ -345,7 +377,7 @@ end)
 local function staticTerritoryCase(callback)
     local globals = { "C_Map", "C_PvP", "GetZonePVPInfo", "UnitFactionGroup", "GetBuildInfo", "IsInInstance",
         "UnitIsPVPFreeForAll", "FACTION_HORDE", "FACTION_ALLIANCE", "SetMapToCurrentZone", "SetMapZoom",
-        "SetCVar", "C_CVar" }
+        "SetCVar", "C_CVar", "GetInstanceInfo", "C_Minimap" }
     local saved, oldZone, oldSubzone = {}, zone, subzone
     for _, name in ipairs(globals) do saved[name] = _G[name] end
     local state = { mapID = 1413, infoMapID = 1413, mapType = 3, mapName = "The Barrens", areaName = "The Barrens",
@@ -515,9 +547,8 @@ test("client version labels do not disable valid current map ownership", functio
     end
 end)
 
-test("instance interiors cannot inherit a stale owned world-map result", function()
-    for _, change in ipairs({ function(state) state.inInstance = true end,
-        function(state) state.inInstance = restricted end,
+test("unavailable instance state cannot justify static ownership", function()
+    for _, change in ipairs({ function(state) state.inInstance = restricted end,
         function() IsInInstance = nil end,
         function() IsInInstance = function() error("Instance state unavailable") end end }) do
         staticTerritoryCase(function(state)
@@ -646,6 +677,345 @@ test("unexpected native map failures remain observable without rewriting locatio
     equal(ok, false); assert(tostring(reason):find("native map action failed", 1, true))
     equal(widget.settings.showCoordinates, false); equal(widget.text, "Elwynn Forest")
     ToggleWorldMap = previous
+end)
+
+-- Client-observed cave contract: BestMap is the continent, while the native
+-- spatial query returns the containing zone. The player-facing cave name stays.
+local function continentTerritoryCase(callback)
+    staticTerritoryCase(function(state)
+        zone, subzone = "The Wailing Caverns", "Wailing Caverns"
+        state.mapID, state.x, state.y = 1414, 0.521, 0.550
+        state.origin = { mapID = 1414, mapType = 2, name = "Kalimdor", parentMapID = 947 }
+        state.resolved = { mapID = 1413, mapType = 3, name = "The Barrens", parentMapID = 1414 }
+        state.canonical = { mapID = 1413, mapType = 3, name = "The Barrens", parentMapID = 1414 }
+        state.spatialReads, state.positionReads = 0, 0
+        C_Map.GetMapInfo = function(id)
+            if id == 1414 then return state.origin end
+            if id == 1413 then return state.canonical end
+        end
+        C_Map.GetPlayerMapPosition = function(id, unit)
+            equal(id, state.mapID); equal(unit, "player")
+            state.positionReads = state.positionReads + 1
+            return { GetXY = function() return state.x, state.y end }
+        end
+        C_Map.GetMapInfoAtPosition = function(id, pointX, pointY, ...)
+            equal(id, 1414); equal(pointX, state.x); equal(pointY, state.y)
+            equal(select("#", ...), 0) -- Keep the native default zone-position policy.
+            state.spatialReads = state.spatialReads + 1
+            return state.resolved
+        end
+        callback(state)
+    end)
+end
+
+test("a client-resolved continent position classifies the Wailing Caverns without renaming it", function()
+    continentTerritoryCase(function(state)
+        local shown, widget = render({ colorStatus = false })
+        equal(shown, "The Wailing Caverns (52.1, 55.0) [Friendly]")
+        local tip = tipFor(widget)
+        equal(tip.rows.Zone, "The Wailing Caverns"); equal(tip.rows.Subzone, "Wailing Caverns")
+        equal(tip.rows.Coordinates, "52.1, 55.0")
+        equal(tip.rows.Territory, "Friendly"); equal(tip.rows["Territory faction"], "Horde")
+        equal(MenubarLocationDiagnostics().source, "clientData")
+        state.player, state.localizedPlayer = "Alliance", "Alliance"
+        equal(render({ showCoordinates = false, colorStatus = false }), "The Wailing Caverns [Enemy]")
+        assert(state.spatialReads >= 2)
+        equal(state.metadataReads, 0); equal(state.writes, 0)
+    end)
+end)
+
+test("spatial ownership rejects unavailable or invalid player coordinates before resolving a zone", function()
+    local cases = {
+        function() C_Map.GetPlayerMapPosition = nil end,
+        function() C_Map.GetPlayerMapPosition = function() error("position unavailable") end end,
+        function() C_Map.GetPlayerMapPosition = function() return restricted end end,
+        function() C_Map.GetPlayerMapPosition = function() return {} end end,
+        function() C_Map.GetPlayerMapPosition = function() return { GetXY = function() error("vector unavailable") end } end end,
+        function(state) state.x = restricted end,
+        function(state) state.y = restricted end,
+        function(state) state.x = -0.01 end,
+        function(state) state.y = 1.01 end,
+        function(state) state.x = 0 / 0 end,
+        function(state) state.y = math.huge end,
+    }
+    for _, change in ipairs(cases) do
+        continentTerritoryCase(function(state)
+            change(state)
+            equal(render({ showCoordinates = false, colorStatus = false }), "The Wailing Caverns [Unknown]")
+            equal(state.spatialReads, 0)
+        end)
+    end
+end)
+
+test("spatial ownership requires a genuine continent and a verified child zone in that continent", function()
+    local cases = {
+        function(state) state.origin.mapID = 1415 end,
+        function(state) state.origin.mapID = restricted end,
+        function(state) state.origin.mapType = 0 end,
+        function(state) state.origin.mapType = 3 end,
+        function(state) state.origin.mapType = restricted end,
+        function() C_Map.GetMapInfoAtPosition = nil end,
+        function() C_Map.GetMapInfoAtPosition = function() error("spatial query unavailable") end end,
+        function() C_Map.GetMapInfoAtPosition = function() return restricted end end,
+        function() C_Map.GetMapInfoAtPosition = function() return {} end end,
+        function(state) state.resolved.mapID = 9999 end,
+        function(state) state.resolved.mapID = restricted end,
+        function(state) state.resolved.mapType = 2 end,
+        function(state) state.resolved.mapType = 4 end,
+        function(state) state.resolved.mapType = restricted end,
+        function(state) state.resolved.parentMapID = 1415 end,
+        function(state) state.resolved.parentMapID = restricted end,
+        function(state) state.resolved.name = restricted end,
+        function(state) state.resolved.name = "Another zone" end,
+        function(state) state.canonical = nil end,
+        function(state) state.canonical.mapID = 1412 end,
+        function(state) state.canonical.mapID = restricted end,
+        function(state) state.canonical.mapType = 4 end,
+        function(state) state.canonical.mapType = restricted end,
+        function(state) state.canonical.parentMapID = 1415 end,
+        function(state) state.canonical.parentMapID = restricted end,
+        function(state) state.canonical.name = "Another zone" end,
+        function(state) state.canonical.name = restricted end,
+        function(state) state.areaName = "Another area" end,
+        function(state) state.areaName = restricted end,
+    }
+    for _, change in ipairs(cases) do
+        continentTerritoryCase(function(state)
+            change(state)
+            local shown, widget = render({ showCoordinates = false, colorStatus = false })
+            equal(shown, "The Wailing Caverns [Unknown]")
+            equal(tipFor(widget).rows.Territory, nil)
+        end)
+    end
+end)
+
+test("native instance and live PvP restrictions precede the spatial ownership fallback", function()
+    local cases = {
+        { change = function(state) state.inInstance = true end, label = "Dungeon" },
+        { change = function(state) state.inInstance = restricted end, label = "Unknown" },
+        { change = function(state) state.freeForAll = true end, label = "Unknown" },
+        { change = function(state) state.freeForAll = restricted end, label = "Unknown" },
+        { change = function() C_PvP.GetZonePVPInfo = function() return "sanctuary" end end, label = "Sanctuary" },
+        { change = function() C_PvP.GetZonePVPInfo = function() return "future-category" end end, label = "Unknown" },
+        { change = function() C_PvP.GetZonePVPInfo = function() return restricted end end, label = "Unknown" },
+        { change = function() C_PvP.GetZonePVPInfo = function() return nil, true end end, label = "Unknown" },
+        { change = function() C_PvP.GetZonePVPInfo = function() return nil, restricted end end, label = "Unknown" },
+        { change = function() C_PvP.GetZonePVPInfo = function() return nil, false, restricted end end, label = "Unknown" },
+    }
+    for _, sample in ipairs(cases) do
+        continentTerritoryCase(function(state)
+            sample.change(state)
+            equal(render({ showCoordinates = false, colorStatus = false }), "The Wailing Caverns [" .. sample.label .. "]")
+            equal(state.spatialReads, 0)
+        end)
+    end
+end)
+
+test("verified direct zone maps never use the spatial API or bypass their exact zone-name check", function()
+    staticTerritoryCase(function()
+        local queries = 0
+        C_Map.GetMapInfoAtPosition = function() queries = queries + 1; error("direct zone must not use spatial lookup") end
+        C_Map.GetPlayerMapPosition = function() error("ownership of a direct zone needs no coordinate read") end
+        equal(render({ showCoordinates = false, colorStatus = false }), "The Barrens [Friendly]")
+        zone = "The Wailing Caverns"
+        equal(render({ showCoordinates = false, colorStatus = false }), "The Wailing Caverns [Unknown]")
+        equal(queries, 0)
+    end)
+end)
+
+test("continent ownership follows current native results on each poll without sticky territory state", function()
+    continentTerritoryCase(function(state)
+        local _, widget = render({ showCoordinates = false, colorStatus = false })
+        equal(widget.text, "The Wailing Caverns [Friendly]")
+        local start = state.spatialReads
+        state.resolved.mapID = 9999; provider.update(widget)
+        equal(widget.text, "The Wailing Caverns [Unknown]")
+        state.resolved.mapID = 1413; provider.update(widget)
+        equal(widget.text, "The Wailing Caverns [Friendly]")
+        equal(state.spatialReads, start + 2)
+        state.inInstance = true; provider.update(widget)
+        equal(widget.text, "The Wailing Caverns [Dungeon]")
+        equal(state.spatialReads, start + 2)
+        state.inInstance = false; provider.update(widget)
+        equal(widget.text, "The Wailing Caverns [Friendly]")
+        state.mapID, zone = 1413, "The Barrens"; provider.update(widget)
+        equal(widget.text, "The Barrens [Friendly]")
+        equal(state.spatialReads, start + 3)
+        equal(state.writes, 0)
+    end)
+end)
+
+test("crossing the Wailing Caverns portal drops outdoor data and restores it on exit", function()
+    continentTerritoryCase(function(state)
+        local _, widget = render({ colorStatus = false })
+        equal(widget.text, "The Wailing Caverns (52.1, 55.0) [Friendly]")
+        local outdoorReads = state.spatialReads
+        state.inInstance = true
+        zone, subzone = "Wailing Caverns", ""
+        for _, oldMap in ipairs({ 1414, 1413, 947 }) do
+            state.mapID = oldMap
+            if oldMap == 947 then
+                C_Map.GetMapInfo = function() return { mapID = 947, mapType = 1, name = "Azeroth" } end
+            end
+            provider.update(widget)
+            equal(widget.text, "Wailing Caverns [Dungeon]")
+            local rows = tipFor(widget).rows
+            equal(rows.Zone, "Wailing Caverns"); equal(rows["Instance type"], "Dungeon")
+            equal(rows.Coordinates, nil); equal(rows.Territory, nil); equal(rows["Territory faction"], nil)
+        end
+        state.mapID = nil
+        provider.update(widget)
+        equal(widget.text, "Wailing Caverns [Dungeon]")
+        equal(tipFor(widget).rows.Coordinates, nil)
+        equal(state.spatialReads, outdoorReads)
+
+        state.inInstance, state.mapID = false, 1413
+        zone, subzone = "The Barrens", "Lushwater Oasis"
+        C_Map.GetMapInfo = function() return state.canonical end
+        provider.update(widget)
+        equal(widget.text, "The Barrens (52.1, 55.0) [Friendly]")
+        local rows = tipFor(widget).rows
+        equal(rows["Instance type"], nil); equal(rows["Territory faction"], "Horde")
+    end)
+end)
+
+test("available dungeon coordinates and live territory take priority over fallbacks", function()
+    staticTerritoryCase(function(state)
+        state.inInstance = true
+        zone, subzone = "Wailing Caverns", "Pit of Fangs"
+        -- An illustrative dungeon floor; behavior must not depend on its ID.
+        state.mapID, state.infoMapID, state.mapType, state.mapName = 67890, 67890, 4, zone
+        C_PvP.GetZonePVPInfo = function() return "sanctuary" end
+        local _, widget = render({ name = "both", colorStatus = false })
+        equal(widget.text, "Wailing Caverns: Pit of Fangs (52.4, 29.4) [Sanctuary]")
+        local rows = tipFor(widget).rows
+        equal(rows["Instance type"], "Dungeon"); equal(rows.Territory, "Sanctuary")
+        equal(rows.Coordinates, "52.4, 29.4")
+        C_Map.GetMapInfo = nil
+        equal(render({ showStatus = false }), "Wailing Caverns (52.4, 29.4)")
+        widget.settings.showCoordinates, widget.settings.showStatus = false, false
+        provider.update(widget)
+        equal(widget.text, "Wailing Caverns: Pit of Fangs")
+        C_Map.GetPlayerMapPosition = function() return { GetXY = function() return restricted, 0.2 end } end
+        equal(tipFor(widget).rows.Coordinates, nil)
+    end)
+end)
+
+-- Compare the best player map and the minimap's current floor independently.
+-- Synthetic floor IDs avoid assuming that all clients expose the same dungeon maps.
+local function dungeonMinimapCase(callback)
+    staticTerritoryCase(function(state)
+        zone, subzone = "Wailing Caverns", ""
+        local best, floor = 67890, 67891
+        state.inInstance, state.mapID = true, best
+        state.minimapID, state.minimapReads, state.floorPositionReads = floor, 0, 0
+        state.floorInfo = { mapID = floor, mapType = 4, name = zone }
+        C_Minimap = { GetUiMapID = function()
+            state.minimapReads = state.minimapReads + 1
+            return state.minimapID
+        end }
+        C_Map.GetMapInfo = function(id)
+            if id == floor then return state.floorInfo end
+            return { mapID = id, mapType = 4, name = zone }
+        end
+        C_Map.GetPlayerMapPosition = function(id, unit)
+            equal(unit, "player")
+            if id == floor then
+                state.floorPositionReads = state.floorPositionReads + 1
+                return { GetXY = function() return 0.25, 0.75 end }
+            end
+            equal(id, best)
+            if state.primary then return state.primary() end
+        end
+        callback(state, best, floor)
+    end)
+end
+
+test("a public dungeon floor on the minimap fills missing player-map coordinates", function()
+    dungeonMinimapCase(function(state, best)
+        local _, widget = render({ colorStatus = false })
+        equal(widget.text, "Wailing Caverns (25.0, 75.0) [Dungeon]")
+        equal(tipFor(widget).rows.Coordinates, "25.0, 75.0")
+        state.mapID = nil
+        provider.update(widget)
+        equal(widget.text, "Wailing Caverns (25.0, 75.0) [Dungeon]")
+
+        state.mapID = best
+        state.primary = function() return { GetXY = function() return 0.6, 0.4 end } end
+        local reads = state.minimapReads
+        provider.update(widget)
+        equal(widget.text, "Wailing Caverns (60.0, 40.0) [Dungeon]")
+        equal(state.minimapReads, reads)
+        state.inInstance, state.mapID, zone = false, nil, "The Barrens"
+        provider.update(widget)
+        equal(widget.text, "The Barrens (--, --) [Unknown]")
+        equal(state.minimapReads, reads)
+    end)
+end)
+
+test("minimap fallback requires a distinct identified Dungeon map", function()
+    local cases = {
+        function(state, best) state.minimapID = best end,
+        function(state) state.minimapID = restricted end,
+        function(state) state.floorInfo = nil end,
+        function(state) state.floorInfo = restricted end,
+        function(state) state.floorInfo.mapID = 27 end,
+        function(state) state.floorInfo.mapID = restricted end,
+        function(state) state.floorInfo.mapType = 3 end,
+        function(state) state.floorInfo.mapType = restricted end,
+        function() C_Minimap = nil end,
+        function() C_Minimap.GetUiMapID = function() error("no floor map") end end,
+    }
+    for _, change in ipairs(cases) do
+        dungeonMinimapCase(function(state, best)
+            change(state, best)
+            local shown, widget = render({ colorStatus = false })
+            equal(shown, "Wailing Caverns [Dungeon]")
+            equal(tipFor(widget).rows.Coordinates, nil)
+            equal(state.floorPositionReads, 0)
+        end)
+    end
+end)
+
+test("a restricted or failing primary map read never triggers the alternate coordinate lookup", function()
+    local cases = {
+        function(state) state.mapID = restricted end,
+        function() C_Map.GetBestMapForUnit = function() error("restricted best map") end end,
+        function(state) state.primary = function() return restricted end end,
+        function(state) state.primary = function() error("restricted position") end end,
+        function(state) state.primary = function() return { GetXY = function() return restricted, 0.2 end } end end,
+        function(state) state.primary = function() return { GetXY = function() error("restricted vector") end } end end,
+    }
+    for _, change in ipairs(cases) do
+        dungeonMinimapCase(function(state)
+            change(state)
+            local shown, widget = render({ colorStatus = false })
+            equal(shown, "Wailing Caverns [Dungeon]")
+            equal(tipFor(widget).rows.Coordinates, nil)
+            equal(state.minimapReads, 0); equal(state.floorPositionReads, 0)
+        end)
+    end
+end)
+
+test("instance type and localized name respect public client values", function()
+    staticTerritoryCase(function(state)
+        state.mapID, zone, subzone = nil, restricted, ""
+        GetInstanceInfo = function() return "Les cavernes des Lamentations" end
+        for _, sample in ipairs({ { "raid", "Raid" }, { "future-type", "Instance" },
+            { restricted, "Instance" }, { nil, "Instance" } }) do
+            IsInInstance = function() return true, sample[1] end
+            local shown, widget = render({ colorStatus = false })
+            equal(shown, "Les cavernes des Lamentations [" .. sample[2] .. "]")
+            local rows = tipFor(widget).rows
+            equal(rows.Zone, "Les cavernes des Lamentations")
+            equal(rows["Instance type"], sample[2]); equal(rows.Coordinates, nil)
+        end
+        zone = "Name from the zone API"
+        IsInInstance = function() return true, "party" end
+        equal(render({ colorStatus = false }), "Name from the zone API [Dungeon]")
+        IsInInstance = function() return restricted, "party" end
+        equal(render({ colorStatus = false }), "Name from the zone API (--, --) [Unknown]")
+    end)
 end)
 
 print(string.format("%d Location tests passed", passed))

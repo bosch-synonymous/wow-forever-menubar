@@ -226,7 +226,7 @@ function Region:SetFontObject(value)
     if type(value) == "string" then value = _G[value] end
     assert(type(value) == "table" and type(value.GetFont) == "function", "Expected a native font object")
     self.fontObject = value
-    self:SetFont(value:GetFont())
+    Region.SetFont(self, value:GetFont())
     if value.textColor then self:SetTextColor(unpack(value.textColor)) end
 end
 function Region:GetFontObject() return self.fontObject end
@@ -357,9 +357,16 @@ function Region:AttachFrame(kind, template)
     return frame
 end
 function Region:AttachTexture(...) return self:CreateTexture(...) end
+-- Blizzard's menu compositor rejects even looking up SetFont on a managed
+-- FontString. SetFontObject remains available and uses the native binding.
+local managedFontString = { __index = function(_, method)
+    if method == "SetFont" then error("SetFont is unavailable on a managed menu FontString") end
+    return Region[method]
+end }
 function Region:AttachFontString(...)
-    local text = self:CreateFontString(...)
+    local text = setmetatable(self:CreateFontString(...), managedFontString)
     -- Native compositor defaults; callers own the eventual text rectangle.
+    text:SetFontObject(GameFontHighlight)
     text:SetSize(150, 1); text.maxLines = 1
     text:SetJustifyH("LEFT"); text:SetJustifyV("MIDDLE")
     return text

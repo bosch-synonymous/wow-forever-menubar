@@ -80,7 +80,7 @@ local function assertContentOpaque()
         end
     end
 end
-local styles = { "system7", "macos8", "macosx", "warcraftBrown", "warcraftBlack", "warcraftRed" }
+local styles = { "system7", "macos8", "macosx", "macos27", "warcraftBrown", "warcraftBlack", "warcraftRed" }
 
 check("all styles and bar placements fade only the background at zero fractional and full opacity", function()
     local profile = Menubar:GetProfile()
@@ -107,7 +107,7 @@ check("all styles and bar placements fade only the background at zero fractional
                         assert(texture:GetParent() == bar.surface)
                         equal(texture:GetEffectiveAlpha(), opacity)
                     end
-                    if MenubarSkins.IsWarcraft(style) or style == "macosx" then
+                    if MenubarSkins.IsWarcraft(style) or style == "macosx" or style == "macos27" then
                         assert(not bar.background:IsShown(), "The selected style must replace the backup surface")
                     end
                 end
@@ -127,7 +127,7 @@ check("background swatch alpha combines with opacity without fading frame colour
         for _, bar in pairs(Menubar.bars) do
             if bar.background:IsShown() then equal(paintAlpha(bar.background), 0.37 * 0.6) end
             for _, texture in ipairs(surfaces(bar.warcraftSkin)) do equal(paintAlpha(texture), 0.37 * 0.6) end
-            if style == "macosx" then
+            if style == "macosx" or style == "macos27" then
                 for _, band in ipairs(bar.shadingBands) do if band:IsShown() then equal(paintAlpha(band), 0.37 * 0.6) end end
             end
             if bar.bottomLine:IsShown() then equal(paintAlpha(bar.bottomLine), 0.45) end

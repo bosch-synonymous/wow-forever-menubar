@@ -93,6 +93,7 @@ local function fixture(options)
     end
     f.nativeHandler, f.nativeOnHide, f.nativeParent = native.OnClick, native:GetScript("OnHide"), native:GetParent()
     loadAddon(core, "Menubar")
+    if options.atlasReadback then Menubar.ApplyThemeIcon = nil end -- Exercise older hosts with native artwork.
     if options.oldHost then Menubar.CAPABILITIES = nil end
     loadAddon(root, "Menubar_Social")
     Menubar:Start()
@@ -166,6 +167,57 @@ check("Social menu actions ignore released removed and suspended widget lifetime
             f.host.UI:WidgetMenu(widget.frame, widget.instance)
             findItem(f.Stub.menus[#f.Stub.menus], "Open Social").callback()
             equal(f.clicks, 1)
+        end
+    end
+end)
+
+check("a rejected glyph falls back to text without a button plate", function()
+    local f = fixture()
+    local icon = f.widget.socialIcon
+    local apply = f.host.ApplyThemeIcon
+    f.host.ApplyThemeIcon = function() return false end
+    f.host:RefreshWidget(f.widget.id)
+    equal(icon:IsShown(), false); equal(icon:GetAtlas(), nil)
+    equal(f.widget.label:GetText(), "Social 7")
+    f.host.ApplyThemeIcon = apply
+    f.host:RefreshWidget(f.widget.id)
+    equal(icon:IsShown(), true); equal(f.widget.socialIcon, icon)
+end)
+
+check("Social uses the themed bell for friends and both kinds of native toast", function()
+    local f = fixture()
+    local icon = f.widget.socialIcon
+    assert(MenubarModel.ApplyTheme(f.host:GetProfile(), "macos8"))
+    f.host:Rebuild()
+    equal(icon.texCoords[1], 5 / 8)
+    f.native.displayedToast = {}
+    f.host:RefreshWidget(f.widget.id)
+    equal(icon.texCoords[1], 6 / 8)
+    f.native.isLFGList = true
+    f.host:RefreshWidget(f.widget.id)
+    equal(icon.texCoords[1], 7 / 8)
+    equal(icon:IsShown(), true)
+    assert(MenubarModel.ApplyTheme(f.host:GetProfile(), "warcraftBlack"))
+    f.host:Rebuild()
+    equal(icon.texCoords[1], 7 / 8); equal(icon.texCoords[3], 0)
+    equal(icon.vertexColor[1], 1)
+end)
+
+check("Aqua and Liquid Glass share the three hollow bells in their own foreground colours", function()
+    local f = fixture()
+    local icon = f.widget.socialIcon
+    for _, theme in ipairs({ "macos27", "macosx" }) do
+        assert(MenubarModel.ApplyTheme(f.host:GetProfile(), theme))
+        f.host:Rebuild()
+        for state = 0, 2 do
+            f.native.displayedToast = state > 0 and {} or nil
+            f.native.isLFGList = state == 2
+            f.host:RefreshWidget(f.widget.id)
+            equal(f.widget.socialIcon, icon)
+            equal(icon.texCoords[1], (5 + state) / 8)
+            equal(icon.texCoords[3], 3 / 4)
+            local ink = theme == "macosx" and 0 or 1
+            for channel = 1, 3 do equal(icon.vertexColor[channel], ink) end
         end
     end
 end)
@@ -276,11 +328,11 @@ end)
 
 check("hidden icons and widgets stay quiet and hiding or removal stops the owned animation", function()
     local f = fixture(); local widget = f.widget
-    local setAtlas = widget.socialIcon.SetAtlas
-    widget.socialIcon.SetAtlas = function() return false end
+    local apply = f.host.ApplyThemeIcon
+    f.host.ApplyThemeIcon = function() return false end
     f.wowFriends[1].connected = false; f:event("FRIENDLIST_UPDATE")
     equal(widget.socialIcon:IsShown(), false); equal(widget.iconJiggle, nil)
-    widget.socialIcon.SetAtlas = setAtlas
+    f.host.ApplyThemeIcon = apply
     f.host:RefreshWidget(widget.id)
     f.wowFriends[1].connected = true; f:event("FRIENDLIST_UPDATE")
     local group = widget.iconJiggle.group; equal(group.playing, true)

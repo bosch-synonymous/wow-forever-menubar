@@ -7,6 +7,7 @@ local function call(method, ...)
     if type(method) ~= "function" then return nil end
     local ok, value = pcall(method, ...)
     if ok and readable(value) then return value end
+    return nil, true -- A failed or restricted read must not trigger another position lookup.
 end
 
 local function textFrom(method)
@@ -14,9 +15,41 @@ local function textFrom(method)
     if type(value) == "string" and value ~= "" then return value end
 end
 
+local instanceLabels = {
+    party = "Dungeon", raid = "Raid", scenario = "Scenario", pvp = "Battleground", arena = "Arena",
+}
+
+-- False is a confirmed outdoor location. A missing or restricted answer
+-- cannot authorize the outdoor ownership lookup or an instance label.
+local function currentInstance()
+    if type(IsInInstance) ~= "function" then return nil end
+    local ok, inside, kind = pcall(IsInInstance)
+    if not ok or not readable(inside) or type(inside) ~= "boolean" then return nil end
+    if not inside then return false end
+    return readable(kind) and type(kind) == "string" and instanceLabels[kind] or "Instance"
+end
+
+local function currentZone(instance)
+    local zone = textFrom(GetRealZoneText)
+    if not zone and instance then zone = textFrom(GetInstanceInfo) end
+    return zone
+end
+
 local function positiveID(value)
     return readable(value) and type(value) == "number" and value > 0 and value < math.huge
         and value == math.floor(value)
+end
+
+local function normalized(value)
+    return readable(value) and type(value) == "number" and value >= 0 and value <= 1
+end
+
+local function playerPosition(mapID)
+    local position, blocked = call(C_Map.GetPlayerMapPosition, mapID, "player")
+    if position == nil then return nil, nil, blocked end
+    local ok, x, y = pcall(function() return position:GetXY() end)
+    if ok and normalized(x) and normalized(y) then return x, y end
+    return nil, nil, true
 end
 
 local territories = {
@@ -28,6 +61,29 @@ local territories = {
     arena = { label = "Free-for-all", color = "A02080" },
 }
 local unknownTerritory = { label = "Unknown", color = "606060" }
+
+-- Custom images and the world behind transparent bars have no fixed colour.
+-- For those, follow the player's chosen foreground as a contrast cue.
+local function friendlyColor()
+    local profile = Menubar.GetProfile and Menubar:GetProfile()
+    if profile then
+        local texture = profile.texture
+        local background = profile.background
+        local knownSurface = texture == "solid" or texture == "dither" or texture == "theme"
+        if knownSurface and background and profile.opacity * background[4] > 0.2 then
+            if texture == "theme" and MenubarSkins and MenubarSkins.IsWarcraft(profile.theme) then
+                return "8BE99A" -- Warcraft artwork is dark; its profile swatch is a tint.
+            end
+            if 0.2126 * background[1] + 0.7152 * background[2] + 0.0722 * background[3] < 0.5 then
+                return "8BE99A"
+            end
+        else
+            local ink = profile.textColor
+            if 0.2126 * ink[1] + 0.7152 * ink[2] + 0.0722 * ink[3] >= 0.5 then return "8BE99A" end
+        end
+    end
+    return territories.friendly.color
+end
 
 local function readTerritory(method)
     if type(method) ~= "function" then return nil, "unavailable" end
@@ -65,12 +121,31 @@ local function playerFaction()
     end
 end
 
-local function clientOwnership()
+local function mapMatches(info, mapID, mapType)
+    return type(info) == "table" and readable(info.mapID) and info.mapID == mapID
+        and readable(info.mapType) and info.mapType == mapType
+        and readable(info.name) and type(info.name) == "string"
+end
+
+local function zoneAtPosition(continentID, data)
+    if type(C_Map.GetMapInfoAtPosition) ~= "function" then return nil end
+    local x, y = playerPosition(continentID)
+    if x == nil then return nil end
+    local info = call(C_Map.GetMapInfoAtPosition, continentID, x, y)
+    if type(info) ~= "table" or not positiveID(info.mapID) or not mapMatches(info, info.mapID, 3)
+        or not readable(info.parentMapID) or info.parentMapID ~= continentID
+        or not data.maps[info.mapID] then return nil end
+    local canonical = call(C_Map.GetMapInfo, info.mapID)
+    if not mapMatches(canonical, info.mapID, 3) or canonical.name ~= info.name
+        or not readable(canonical.parentMapID) or canonical.parentMapID ~= continentID then return nil end
+    return canonical
+end
+
+local function clientOwnership(instance)
     local data = _G.MenubarLocationTerritories
     if type(data) ~= "table" then return nil, "data-unavailable" end
     if type(C_Map) ~= "table" then return nil, "map-api-unavailable" end
-    local inInstance = call(IsInInstance)
-    if inInstance ~= false then return nil, inInstance == true and "instance" or "instance-unavailable" end
+    if instance ~= false then return nil, instance and "instance" or "instance-unavailable" end
     if type(UnitIsPVPFreeForAll) == "function" then
         local ok, freeForAll = pcall(UnitIsPVPFreeForAll, "player")
         if not ok or not readable(freeForAll) then return nil, "free-for-all-unavailable" end
@@ -81,20 +156,28 @@ local function clientOwnership()
     local mapID = call(C_Map.GetBestMapForUnit, "player")
     if not positiveID(mapID) then return nil, "map-unavailable" end
     local entry = data.maps[mapID]
-    if not entry then return nil, "unverified-map" end
     local info = call(C_Map.GetMapInfo, mapID)
-    if type(info) ~= "table" or not readable(info.mapID) or info.mapID ~= mapID
-        or not readable(info.mapType) or info.mapType ~= 3 or not readable(info.name)
-        or type(info.name) ~= "string" then return nil, "map-identity" end
+    local spatial = false
+    if not entry then
+        if not mapMatches(info, mapID, 2) then return nil, "unverified-map" end
+        -- Some outdoor caves report only a continent. Ask the client which
+        -- verified surrounding zone contains the player's current position.
+        info = zoneAtPosition(mapID, data)
+        if not info then return nil, "spatial-map-unavailable" end
+        mapID, spatial = info.mapID, true
+        entry = data.maps[mapID]
+    end
+    if not mapMatches(info, mapID, 3) then return nil, "map-identity" end
     local name = call(C_Map.GetAreaInfo, entry.areaID)
-    -- Confirm the exact current area in the client's language; do not apply stale map data.
+    -- Direct maps need the exact current zone name. A spatially resolved zone
+    -- can instead surround a differently named cave, with its identity checked above.
     if type(name) ~= "string" or name == "" or info.name ~= name then return nil, "area-name" end
-    if textFrom(GetRealZoneText) ~= name then return nil, "zone-name" end
+    if not spatial and textFrom(GetRealZoneText) ~= name then return nil, "zone-name" end
     if entry.owner == "Horde" or entry.owner == "Alliance" then return entry.owner end
     return nil, "unverified-owner"
 end
 
-local function territory()
+local function territory(instance)
     local modern = type(C_PvP) == "table" and C_PvP.GetZonePVPInfo or nil
     local result, status = readTerritory(modern)
     if status == "known" or status == "unknown" or status == "restricted" then return result end
@@ -125,7 +208,7 @@ local function territory()
     if not result.faction and not result.factionRestricted and result.subzonePvP ~= true and not result.subzonePvPRestricted then
         local player = playerFaction()
         if player then
-            local owner, reason = clientOwnership()
+            local owner, reason = clientOwnership(instance)
             result.fallbackReason = reason
             if owner then
                 result.state = owner == player and territories.friendly or territories.hostile
@@ -141,28 +224,109 @@ local function territory()
 end
 
 -- Read-only support snapshot. Diagnostic reasons stay outside the normal widget presentation.
-_G.MenubarLocationDiagnostics = territory
+_G.MenubarLocationDiagnostics = function() return territory(currentInstance()) end
 
-local function normalized(value)
-    return readable(value) and type(value) == "number" and value >= 0 and value <= 1
+local function mapTypeForID(mapID)
+    local info = call(C_Map.GetMapInfo, mapID)
+    if type(info) == "table" and readable(info.mapID) and info.mapID == mapID and readable(info.mapType) then
+        return info.mapType
+    end
 end
 
-local function coordinates()
-    if not C_Map then return nil end
-    local mapID = call(C_Map.GetBestMapForUnit, "player")
-    if not positiveID(mapID) then return nil end
-    local position = call(C_Map.GetPlayerMapPosition, mapID, "player")
-    if not position then return nil end
-    local ok, x, y = pcall(function() return position:GetXY() end)
-    if ok and normalized(x) and normalized(y) then return { x = x * 100, y = y * 100 } end
+local function isExteriorMap(mapID)
+    -- A portal transition can briefly leave the continent or surrounding outdoor zone as the best map.
+    local kind = mapTypeForID(mapID)
+    if kind == 0 or kind == 1 or kind == 2 then return true end -- Cosmic, world or continent.
+    local data = _G.MenubarLocationTerritories
+    return kind == 3 and type(data) == "table" and type(data.maps) == "table" and data.maps[mapID] ~= nil
 end
 
-local function formatCoordinates(point, settings)
+local function coordinates(instance)
+    if type(C_Map) ~= "table" or type(C_Map.GetPlayerMapPosition) ~= "function" then return nil end
+    local mapID, blocked = call(C_Map.GetBestMapForUnit, "player")
+    if blocked or (mapID ~= nil and not positiveID(mapID)) then return nil end
+    local x, y
+    if mapID and not (instance and isExteriorMap(mapID)) then
+        x, y, blocked = playerPosition(mapID)
+    end
+    if x == nil and instance and not blocked and type(C_Minimap) == "table" then
+        -- The minimap can already be on a dungeon floor while the world map has no player position.
+        local floorID = call(C_Minimap.GetUiMapID)
+        if positiveID(floorID) and floorID ~= mapID and mapTypeForID(floorID) == 4 then
+            x, y = playerPosition(floorID)
+        end
+    end
+    if x ~= nil then return { x = x * 100, y = y * 100 } end
+end
+
+local coordinateFormats = { [0] = "%.0f, %.0f", "%.1f, %.1f", "%.2f, %.2f" }
+
+local function precision(settings)
+    return coordinateFormats[settings.decimals] and settings.decimals or 1
+end
+
+local function formatCoordinates(point, decimals)
     if not point then return "--, --" end
-    local decimals = settings.decimals
-    if decimals ~= 0 and decimals ~= 2 then decimals = 1 end
-    local format = "%0." .. decimals .. "f, %0." .. decimals .. "f"
-    return string.format(format, point.x, point.y)
+    return string.format(coordinateFormats[decimals], point.x, point.y)
+end
+
+local function textWidth(label, text)
+    label:SetText(text)
+    return label:GetStringWidth()
+end
+
+local function widestDigits(label, before, after, format, last)
+    local widest, width = "", -1
+    for i = 0, last do
+        local digits = string.format(format, i)
+        local measured = textWidth(label, before .. digits .. after)
+        if measured > width then widest, width = digits, measured end
+    end
+    return widest
+end
+
+local function widestCoordinate(label, before, after, decimals)
+    -- The decimal point separates the two digit runs. Measure each with its
+    -- neighbours to include kerning, then compare the rounded endpoint and fallback.
+    local digits = widestDigits(label, before, decimals == 0 and after or ".", "%d", 99)
+    if decimals > 0 then
+        local fraction = widestDigits(label, ".", after, "%0" .. decimals .. "d", 10 ^ decimals - 1)
+        digits = digits .. "." .. fraction
+    end
+    local endpoint = string.format("%." .. decimals .. "f", 100)
+    local width = textWidth(label, before .. digits .. after)
+    local endpointWidth = textWidth(label, before .. endpoint .. after)
+    if endpointWidth > width then digits, width = endpoint, endpointWidth end
+    if textWidth(label, before .. "--" .. after) > width then return "--" end
+    return digits
+end
+
+local function reserveCoordinateWidth(widget, name, suffix, decimals)
+    local label = widget.label
+    if not label or not widget.SetWidth then return end
+    local face, size, flags = label:GetFont()
+    local scale = widget.frame:GetEffectiveScale()
+    local cache = widget.locationSizing
+    if not cache or cache.face ~= face or cache.size ~= size or cache.flags ~= flags
+        or cache.scale ~= scale or cache.decimals ~= decimals then
+        -- Use the rendered label itself. The update restores its display text
+        -- before drawing, and movement then needs no further font measurements.
+        local x = widestCoordinate(label, "(", ",", decimals)
+        local y = widestCoordinate(label, " ", ")", decimals)
+        cache = { face = face, size = size, flags = flags, scale = scale, decimals = decimals,
+            sample = " (" .. x .. ", " .. y .. ")" }
+        widget.locationSizing = cache
+    end
+    local shadowX = label:GetShadowOffset()
+    if cache.name ~= name or cache.suffix ~= suffix or cache.shadowX ~= shadowX then
+        cache.name, cache.suffix, cache.shadowX = name, suffix, shadowX
+        cache.width = math.max(18, math.ceil(textWidth(label, name .. cache.sample .. suffix)) + 8)
+    end
+    if widget.customWidth ~= cache.width then
+        label:ClearAllPoints()
+        label:SetPoint("LEFT", widget.content or widget.frame, "LEFT", 4, 0)
+        widget:SetWidth(cache.width)
+    end
 end
 
 local function zoneName(zone, subzone, choice)
@@ -173,16 +337,31 @@ end
 
 local function update(widget)
     local settings = widget.settings
-    local zone, subzone = textFrom(GetRealZoneText), textFrom(GetSubZoneText)
-    local text = zoneName(zone, subzone, settings.name)
-    if settings.showCoordinates then text = text .. " (" .. formatCoordinates(coordinates(), settings) .. ")" end
+    local instance = currentInstance()
+    local name = zoneName(currentZone(instance), textFrom(GetSubZoneText), settings.name)
+    local suffix = ""
     if settings.showStatus then
-        local state = territory().state
+        local state = territory(instance).state
         local status = state.label
-        if settings.colorStatus then status = "|cff" .. state.color .. status .. "|r" end
-        text = text .. " [" .. status .. "]"
+        if instance and state == unknownTerritory then
+            status = instance
+        elseif settings.colorStatus then
+            local color = state == territories.friendly and friendlyColor() or state.color
+            status = "|cff" .. color .. status .. "|r"
+        end
+        suffix = " [" .. status .. "]"
     end
-    widget:SetText(text)
+    if settings.showCoordinates then
+        local point = coordinates(instance)
+        if point or not instance then
+            local decimals = precision(settings)
+            reserveCoordinateWidth(widget, name, suffix, decimals)
+            widget:SetText(name .. " (" .. formatCoordinates(point, decimals) .. ")" .. suffix)
+            return
+        end
+    end
+    widget.customWidth = nil
+    widget:SetText(name .. suffix)
 end
 
 local function click(widget)
@@ -197,13 +376,17 @@ local function click(widget)
 end
 
 local function tooltip(widget, tip)
-    local zone, subzone = textFrom(GetRealZoneText), textFrom(GetSubZoneText)
-    local point, status = coordinates(), territory()
+    local instance = currentInstance()
+    local zone, subzone = currentZone(instance), textFrom(GetSubZoneText)
+    local point, status = coordinates(instance), territory(instance)
     tip:AddLine("Location")
     tip:AddLine("Find your bearings.", 1, 1, 1)
     tip:AddDoubleLine("Zone", zone or "Unavailable")
     if subzone and subzone ~= zone then tip:AddDoubleLine("Subzone", subzone) end
-    tip:AddDoubleLine("Coordinates", point and formatCoordinates(point, widget.settings) or "Unavailable")
+    if instance then tip:AddDoubleLine("Instance type", instance) end
+    if point or not instance then
+        tip:AddDoubleLine("Coordinates", point and formatCoordinates(point, precision(widget.settings)) or "Unavailable")
+    end
     if status.state ~= unknownTerritory then tip:AddDoubleLine("Territory", status.state.label) end
     if status.faction then tip:AddDoubleLine("Territory faction", status.faction) end
     if status.subzonePvP == true and not status.subzonePvPRestricted then

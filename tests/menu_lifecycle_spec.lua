@@ -170,6 +170,35 @@ check("native root release invalidates cursor and bar tokens without invalidatin
     end
 end)
 
+check("a classic opener is selected only for its own live root menu", function()
+    local f = fixture()
+    local profile = f.host:GetProfile()
+    profile.placement, profile.coreMenuBar = "both", "both"
+    local top, bottom = f.host.bars.top.menu, f.host.bars.bottom.menu
+    for _, theme in ipairs({ "system7", "macos8" }) do
+        MenubarModel.ApplyTheme(profile, theme)
+        f.host:Rebuild()
+        top:Click()
+        local root = f.Stub.menus[#f.Stub.menus]
+        local selected = top.menuSelection
+        assert(selected:IsVisible())
+        equal(selected.color[1], theme == "system7" and 0 or MenubarSkins.platinumSelection[1])
+        equal(top.icon[1].color[1], 1)
+        bottom:Click()
+        assert(not selected:IsShown() and bottom.menuSelection:IsShown())
+        equal(top.icon[1].color[1], 0)
+        top:Click()
+        for _, release in ipairs(root.released) do release(root.menuFrame) end
+        assert(top.menuSelection == selected and selected:IsShown())
+        f.host:Rebuild()
+        assert(not selected:IsShown() and not bottom.menuSelection:IsShown())
+    end
+    MenubarModel.ApplyTheme(profile, "warcraftBrown")
+    f.host:Rebuild()
+    top:Click()
+    assert(not top.menuSelection:IsShown())
+end)
+
 check("blank bar clicks stay inert while the main control toggles without rebuilding its closing menu", function()
     local f = fixture({ nativeMouseHandler = true }); local bar = f.host.bars.top
     local before = f:descriptionCount()

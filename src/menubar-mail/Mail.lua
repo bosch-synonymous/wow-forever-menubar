@@ -140,7 +140,10 @@ local function envelope(widget, text)
         widget.mailIcon = icon -- Retain ownership before native configuration.
         if icon then icon:Hide() end
     end
-    if icon and not widget.mailIconReady and type(icon.SetAtlas) == "function" then
+    local themed = icon and Menubar.ApplyThemeIcon and Menubar:ApplyThemeIcon(icon, "mail", widget.label)
+    if Menubar.ApplyThemeIcon then
+        widget.mailIconReady = themed == true
+    elseif icon and not widget.mailIconReady and type(icon.SetAtlas) == "function" then
         local ok, applied = pcall(icon.SetAtlas, icon, "ui-hud-minimap-mail-icon", false)
         local ready = ok and public(applied) and applied ~= false
         if ready and type(icon.GetAtlas) == "function" then
@@ -155,11 +158,17 @@ local function envelope(widget, text)
         if icon then icon:Hide() end
         stopIcon(widget)
         centerLabel(widget)
-        return -- The already-set inline envelope remains the fallback.
+        if Menubar.ApplyThemeIcon then widget.label:SetText(text) end
+        return
     end
     local sizing = widget.mailSizing
     local height = math.min(sizing.height, widget.content and widget.content:GetHeight() or sizing.height)
-    icon:SetSize(height * 4 / 3, height)
+    local width = height * 4 / 3
+    if themed then
+        height = math.min(width, 16, widget.content and widget.content:GetHeight() or 16)
+        width = height -- The original glyphs are square; only Blizzard's envelope is widescreen.
+    end
+    icon:SetSize(width, height)
     icon:ClearAllPoints()
     icon:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", 4, 0)
     icon:Show()

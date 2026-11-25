@@ -121,6 +121,8 @@ function Region:SetRotation(angle) self.rotation = angle end
 function Region:SetDrawLayer(layer) self.layer = layer end
 function Region:SetThumbTexture(texture) self.thumb = texture end
 function Region:SetFontObject(font) self.font = font end
+function Region:GetStringWidth() return #self.text * 6 end
+function Region:GetStringHeight() return 12 end
 function Region:SetJustifyH(value) self.justifyH = value end
 function Region:SetJustifyV(value) self.justifyV = value end
 function Region:SetWordWrap(value) self.wordWrap = value end

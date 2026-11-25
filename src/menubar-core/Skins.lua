@@ -1,5 +1,5 @@
 -- Original skin composition using artwork already supplied by the WoW client.
-local Skins = {}
+local Skins = { platinumSelection = { 0.22, 0.18, 0.51, 1 } }
 _G.MenubarSkins = Skins
 
 local fallbackColors = {
@@ -188,7 +188,7 @@ end
 local function chrome(control, profile, active)
     if not control then return end
     hide(control.warcraftSkin)
-    if control.menubarBare then
+    if control.menubarBare or profile.theme == "macos27" then
         if control.background then control.background:Hide() end
         borders(control, false)
         return

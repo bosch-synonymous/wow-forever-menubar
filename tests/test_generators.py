@@ -28,6 +28,9 @@ class GeneratorPathsTests(unittest.TestCase):
     def test_relocated_tools_reproduce_every_original_asset_without_sibling_repositories(self):
         tools = (
             ("tools/generate_icon.py", "Menubar", "Media"),
+            ("tools/generate_theme_icons.py", "Menubar", "Media/ThemeIcons"),
+            ("tools/generate_popup_art.py", "Menubar", "Media/Popup"),
+            ("tools/widgets/durability/generate_hammer.py", "Menubar_Durability", "Media"),
             ("tools/widgets/eyes/generate_assets.py", "Menubar_Eyes", "Assets"),
             ("tools/widgets/network/generate_icon.py", "Menubar_Network", "Media"),
             ("tools/widgets/performance/generate_icon.py", "Menubar_Performance", "Media"),
@@ -39,7 +42,7 @@ class GeneratorPathsTests(unittest.TestCase):
                 tool = checkout / relative
                 tool.parent.mkdir(parents=True)
                 shutil.copy2(self.root / relative, tool)
-                if addon == "Menubar":
+                if relative == "tools/generate_icon.py":
                     # The project icon shares the widget's original HD eye sampler.
                     eye_sampler = Path("tools/widgets/eyes/generate_assets.py")
                     (checkout / eye_sampler).parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +63,7 @@ class GeneratorPathsTests(unittest.TestCase):
                              for path in (checkout / "src").rglob("*.tga")}
                 self.assertEqual(generated, {f"{source_alias(addon)}/{asset_directory}/{name}": data
                                              for name, data in expected.items()})
-                if addon == "Menubar":
+                if relative == "tools/generate_icon.py":
                     self.assertEqual((checkout / "assets" / "Menubar.png").read_bytes(),
                                      (self.root / "assets" / "Menubar.png").read_bytes())
 

@@ -58,8 +58,9 @@ local function visibleIcon(widget)
     equal(widget.networkIcon:GetParent(), widget.frame); equal(widget.networkOutline:GetParent(), widget.frame)
 end
 
-check("all five theme colours preserve distinct Network layers at zero background opacity and a sixteen-pixel bar", function()
-    for _, filename in ipairs({ "network.tga", "network-outline.tga" }) do
+check("Network selects its artwork, tint and silhouette across theme changes at minimum height", function()
+    local media = "Interface\\AddOns\\Menubar_Network\\Media\\"
+    for _, filename in ipairs({ "network.tga", "network-outline.tga", "network-harmony.tga", "network-wifi.tga" }) do
         local file = assert(io.open(root .. "/src/menubar-network/Media/" .. filename, "rb"))
         local header = file:read(18); file:close()
         equal(header:byte(3), 2); equal(header:byte(13) + 256 * header:byte(14), 64)
@@ -68,11 +69,24 @@ check("all five theme colours preserve distinct Network layers at zero backgroun
     end
     local f = fixture(); local widget = f.widget
     local body, outline = widget.networkIcon, widget.networkOutline
-    for _, theme in ipairs({ "system7", "macos8", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
+    for _, theme in ipairs({ "system7", "macos8", "macosx", "macos27", "system7", "macosx",
+        "warcraftBrown", "macos8", "warcraftBlack", "warcraftRed" }) do
         local profile = f.host:GetProfile()
         assert(MenubarModel.ApplyTheme(profile, theme))
+        -- Switching with identical custom ink must still toggle the outline.
+        if theme == "macos8" or theme == "warcraftBrown" then profile.textColor = { 0.25, 0.36, 0.48, 0.85 } end
         profile.height, profile.opacity = 16, 0
-        f.host:Rebuild(); f:healthy(); visibleIcon(widget)
+        f.host:Rebuild(); f:healthy()
+        local harmony = theme == "system7"
+        local wifi = theme == "macosx" or theme == "macos27"
+        if harmony or wifi or theme == "macos8" then
+            equal(outline:IsShown(), false)
+            assert(body:IsVisible())
+            local expectedFile = harmony and "network-harmony.tga" or wifi and "network-wifi.tga" or "network.tga"
+            equal(body:GetTexture(), media .. expectedFile)
+        else
+            visibleIcon(widget)
+        end
         equal(widget.networkIcon, body); equal(widget.networkOutline, outline)
         equal(widget.text, "81 ms"); equal(widget.label:GetText(), "81 ms")
         equal(widget.frame:GetHeight(), 16)
@@ -84,19 +98,37 @@ check("all five theme colours preserve distinct Network layers at zero backgroun
             assert(region:GetBottom() >= widget.content:GetBottom() - 0.00001)
             assert(region:GetTop() <= widget.frame:GetTop() + 0.00001)
             assert(region:GetBottom() >= widget.frame:GetBottom() - 0.00001)
-            equal(region:GetEffectiveAlpha(), 1); equal(region.vertexColor[4], 1)
+            equal(region:GetEffectiveAlpha(), 1)
         end
-        local r, g, b = widget.label:GetTextColor()
+        local r, g, b, a = widget.label:GetTextColor()
+        equal(body.vertexColor[4], a)
+        if harmony then r, g, b = 1, 1, 1 end
         equal(body.vertexColor[1], r); equal(body.vertexColor[2], g); equal(body.vertexColor[3], b)
-        local expectedEdge = (0.2126 * r + 0.7152 * g + 0.0722 * b) >= 0.5 and 0 or 1
-        equal(outline.vertexColor[1], expectedEdge)
-        equal(outline.vertexColor[2], expectedEdge); equal(outline.vertexColor[3], expectedEdge)
+        if outline:IsShown() then
+            equal(outline.vertexColor[4], a)
+            local expectedEdge = (0.2126 * r + 0.7152 * g + 0.0722 * b) >= 0.5 and 0 or 1
+            equal(outline.vertexColor[1], expectedEdge)
+            equal(outline.vertexColor[2], expectedEdge); equal(outline.vertexColor[3], expectedEdge)
+        end
         near(widget.width, widget.label:GetStringWidth() + 26)
         local point, relative, relativePoint, x, y = widget.label:GetPoint(1)
         equal(point, "LEFT"); equal(relative, widget.content); equal(relativePoint, "LEFT")
         equal(x, 22); equal(y, 0)
         near(body:GetLeft() - widget.frame:GetLeft(), 4)
     end
+end)
+
+check("a fresh Wi-Fi theme needs only one texture and gains an outline when switching to Warcraft", function()
+    local f = fixture(function()
+        assert(MenubarModel.ApplyTheme(Menubar:GetProfile(), "macosx"))
+    end)
+    local widget = f.widget
+    local body = assert(widget.networkIcon)
+    assert(body:IsVisible()); equal(widget.networkOutline, nil)
+    local profile = f.host:GetProfile()
+    assert(MenubarModel.ApplyTheme(profile, "warcraftBrown")); f.host:Rebuild(); f:healthy()
+    visibleIcon(widget); equal(widget.networkIcon, body)
+    equal(widget.networkOutline:GetHeight(), body:GetHeight())
 end)
 
 check("normal polling changes data without repeating static texture placement or tint work", function()
@@ -228,6 +260,7 @@ check("a partially written tint cannot survive failure cleanup when the original
     local f = fixture(); local widget = f.widget
     local body, outline = widget.networkIcon, widget.networkOutline
     local profile = f.host:GetProfile()
+    assert(MenubarModel.ApplyTheme(profile, "warcraftBlack")); f.host:Rebuild(); f:healthy()
     assert(MenubarModel.ApplyTheme(profile, "warcraftBrown")); f.host:Rebuild(); f:healthy()
     equal(body.vertexColor[1], 1)
     local setColor, fail = outline.SetVertexColor, true
@@ -236,9 +269,11 @@ check("a partially written tint cannot survive failure cleanup when the original
         return setColor(self, ...)
     end
     local frames, textures = #f.stub.frames, #f.stub.textures
-    assert(MenubarModel.ApplyTheme(profile, "system7")); f.host:Rebuild()
+    assert(MenubarModel.ApplyTheme(profile, "warcraftBlack"))
+    profile.textColor = { 0.25, 0.36, 0.48, 1 }
+    f.host:Rebuild()
     assert(widget.failed and widget.failed:find("native Network outline tint unavailable", 1, true))
-    equal(body.vertexColor[1], 0) -- The first setter succeeded before the second failed.
+    equal(body.vertexColor[1], 0.25) -- The first setter succeeded before the second failed.
     equal(body:IsShown(), false); equal(outline:IsShown(), false)
     fail = false
     assert(MenubarModel.ApplyTheme(profile, "warcraftBrown")); f.host:Rebuild(); f:healthy(); visibleIcon(widget)

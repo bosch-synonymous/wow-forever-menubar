@@ -343,15 +343,18 @@ check("switching memory units reuses the measuring region and keeps neighbouring
     equal(f.memoryScans, scans); equal(f.metricReads, 0); equal(f.profilerChecks, 0); f:fits()
 end)
 
-check("the original icon stays distinct in all five themes with a transparent bar and minimum height", function()
+check("the icon follows theme ink and drops its outline on Platinum and Aqua at minimum bar height", function()
     local f = fixture(); local widget = f.widget
     local icon, outline = assert(widget.performanceIcon), assert(widget.performanceIconOutline)
     local profile = f.host:GetProfile()
-    local themes = { "system7", "macos8", "warcraftBrown", "warcraftBlack", "warcraftRed" }
+    local themes = { "system7", "macosx", "macos8", "macos27", "warcraftBrown", "macos8", "warcraftBlack", "warcraftRed" }
     for _, theme in ipairs(themes) do
         MenubarModel.ApplyTheme(profile, theme); profile.opacity, profile.height = 0, 16
+        -- Switching with identical custom ink must still toggle the outline.
+        if theme == "macos8" or theme == "warcraftBrown" then profile.textColor = { 0.25, 0.36, 0.48, 0.85 } end
         f.host:Rebuild(); f:fits()
-        assert(icon:IsVisible() and outline:IsVisible())
+        assert(icon:IsVisible())
+        equal(outline:IsShown(), theme ~= "macos8" and theme ~= "macosx")
         equal(icon:GetParent(), widget.frame); equal(outline:GetParent(), widget.frame)
         local iconHeight = math.min(14, widget.content:GetHeight())
         equal(icon:GetWidth(), iconHeight); equal(icon:GetHeight(), iconHeight)

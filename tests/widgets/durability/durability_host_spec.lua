@@ -9,16 +9,16 @@ end
 file:close()
 local Stub = dofile(core .. "/tests/wow_stub.lua")
 Stub.Install()
--- This native setter is void; validate its applied atlas through GetAtlas.
-local Region = getmetatable(UIParent)
-function Region:SetAtlas(name) self.atlas, self.texture = name, nil end
-function Region:GetAtlas() return self.atlas end
+local yellow, red = "|cffffd12e", "|cffed1212"
+local repairHammer = "Interface\\AddOns\\Menubar_Durability\\Media\\repair-hammer.tga"
+local monoHammer = repairHammer:gsub("hammer%.tga$", "hammer-mono.tga")
+local lightThemes = { system7 = true, macos8 = true, macosx = true }
+local ochre, darkRed = "|cff775000", "|cff981f26"
 local gear, alerts = { [1] = { 50, 100 }, [5] = { 100, 100 } }, {}
 GetInventoryItemDurability = function(id)
     local pair = gear[id]; if pair then return pair[1], pair[2] end
 end
 GetInventoryAlertStatus = function(index) return alerts[index] or 0 end
-C_PaperDollInfo = { OffhandHasWeapon = function() return false end }
 for _, name in ipairs({ "Model.lua", "Identity.lua", "Fonts.lua", "Layout.lua", "Gauge.lua", "Skins.lua", "Core.lua", "UI.lua", "Settings.lua" }) do
     dofile(core .. "/src/menubar-core/" .. name)
 end
@@ -46,46 +46,56 @@ check("native events switch between average and multiple slot alerts with real h
     equal(widget.label:GetText(), "75%")
     local summary = assert(widget.durabilitySummaryIcon)
     assert(summary:IsVisible())
-    equal(summary:GetAtlas(), "SpellIcon-256x256-Repair")
+    equal(summary:GetTexture(), repairHammer)
     local normalWidth = widget.width
     alerts[1], alerts[3] = 1, 2; gear[1], gear[5] = { 10, 100 }, { 0, 100 }
     refresh("UPDATE_INVENTORY_ALERTS")
-    equal(#widget.durabilityRegions, 2)
-    equal(widget.durabilityRegions[1].label:GetText(), "10%")
-    equal(widget.durabilityRegions[2].label:GetText(), "0%")
+    equal(widget.label:GetText(), yellow .. "Head 10%|r  " .. red .. "Chest 0%|r")
+    equal(widget.label.fontFlags, "OUTLINE")
     assert(widget.width > normalWidth)
-    assert(widget.text:find("Head 10%", 1, true) and widget.text:find("Chest 0%", 1, true))
-    assert(widget.durabilityRegions[1].icon:IsVisible())
-    assert(not summary:IsShown())
-    equal(widget.durabilityRegions[2].icon.vertexColor[2], 0.07)
+    equal(widget.text, "Durability: Head 10%, Chest 0%")
+    assert(summary:IsVisible()); equal(widget.durabilitySummaryIcon, summary)
 end)
 
-check("theme rebuilds retain graphic identity and apply current font and background opacity", function()
-    local icon = widget.durabilityRegions[1].icon
-    for _, theme in ipairs({ "system7", "macos8", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
+check("theme rebuilds switch hammer art and warning inks on the same texture", function()
+    local icon = widget.durabilitySummaryIcon
+    for _, theme in ipairs({ "system7", "macos8", "macosx", "macos27", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
         assert(MenubarModel.ApplyTheme(Menubar:GetProfile(), theme))
         Menubar:GetProfile().fontSize = 17
-        Menubar:GetProfile().opacity = 0
+        Menubar:GetProfile().opacity = 0.9
         Menubar:Rebuild()
         equal(Menubar.runtime[widget.id], widget)
-        equal(widget.durabilityRegions[1].icon, icon)
-        equal(widget.durabilityRegions[1].label.fontSize, 17)
-        equal(widget.durabilityRegions[1].label.font, widget.label.font)
+        equal(widget.durabilitySummaryIcon, icon)
+        equal(widget.label.fontSize, 17)
+        local light = lightThemes[theme]
+        equal(widget.label.fontFlags, light and "" or "OUTLINE")
+        equal(widget.label.font, Menubar:GetProfile().font)
+        equal(widget.label:GetText(), (light and ochre or yellow) .. "Head 10%|r  "
+            .. (light and darkRed or red) .. "Chest 0%|r")
+        local monochrome = theme == "macosx" or theme == "macos27"
+        equal(icon:GetTexture(), monochrome and monoHammer or repairHammer)
+        for component = 1, 3 do
+            equal(icon.vertexColor[component], monochrome and Menubar:GetProfile().textColor[component] or 1)
+        end
         equal(icon:GetEffectiveAlpha(), 1)
-        equal(Menubar.bars.top.surface:GetAlpha(), 0)
+        equal(Menubar.bars.top.surface:GetAlpha(), 0.9)
     end
 end)
 
 check("real host failure rendering centers a readable error and recovers without new textures", function()
-    local icon = widget.durabilityRegions[1].icon
+    local icon = widget.durabilitySummaryIcon
     local textures = #Stub.textures
-    local original = icon.SetVertexColor
-    icon.SetVertexColor = function(self, ...)
-        self.SetVertexColor = original
-        error("simulated durability tint failure")
+    local label = widget.label
+    local original = label.SetText
+    label.SetText = function(self, text)
+        if text:find("|c", 1, true) then
+            self.SetText = original
+            error("simulated durability text failure")
+        end
+        return original(self, text)
     end
     Menubar:RefreshWidget(widget.id); Menubar:Layout()
-    assert(widget.failed and widget.failed:find("simulated durability tint failure", 1, true))
+    assert(widget.failed and widget.failed:find("simulated durability text failure", 1, true))
     equal(widget.customWidth, nil)
     equal(widget.label.points[1][1], "CENTER")
     assert(not icon:IsShown())
@@ -93,7 +103,7 @@ check("real host failure rendering centers a readable error and recovers without
     assert(widget.width >= widget.label:GetStringWidth() + 8)
     Menubar:RefreshWidget(widget.id); Menubar:Layout()
     assert(not widget.failed)
-    equal(widget.durabilityRegions[1].icon, icon); equal(#Stub.textures, textures)
+    equal(widget.durabilitySummaryIcon, icon); equal(#Stub.textures, textures)
     assert(icon:IsVisible())
 end)
 
@@ -103,45 +113,59 @@ check("native repair and custom threshold changes release warning layout without
     equal(widget.label:GetText(), "100%")
     equal(widget.label.points[1][1], "LEFT")
     assert(widget.durabilitySummaryIcon:IsVisible())
-    for _, value in ipairs(widget.durabilityRegions) do assert(not value.icon:IsShown() and not value.label:IsShown()) end
     widget.settings.customThresholds, widget.settings.warningPercent, widget.settings.criticalPercent = true, 100, 0
     refresh("PLAYER_EQUIPMENT_CHANGED")
-    assert(widget.durabilityRegions[1].icon:IsVisible())
-    assert(not widget.durabilitySummaryIcon:IsShown())
-    equal(widget.durabilityRegions[1].label:GetText(), "100%")
+    assert(widget.durabilitySummaryIcon:IsVisible())
+    equal(widget.label:GetText(), yellow .. "Head 100%|r")
     widget.definition.destroy(widget); widget.definition.destroy(widget)
     equal(widget.customWidth, nil)
-    assert(not widget.durabilityRegions[1].icon:IsShown())
+    assert(not widget.durabilitySummaryIcon:IsShown())
 end)
 
-check("the repair icon stays neutral across themes and recovers from a real-host application failure", function()
+check("transparent bars retain text and icon alpha and use the theme foreground for contrast", function()
     alerts = {}; gear = { [1] = { 100, 100 } }
     widget.settings.customThresholds = false
     refresh()
     local summary = assert(widget.durabilitySummaryIcon)
-    local textures = #Stub.textures
-    for _, theme in ipairs({ "system7", "macos8", "warcraftBrown", "warcraftBlack", "warcraftRed" }) do
-        assert(MenubarModel.ApplyTheme(Menubar:GetProfile(), theme))
-        Menubar:GetProfile().opacity = 0
+    for theme in pairs(MenubarModel.Themes) do
+        local profile = Menubar:GetProfile()
+        assert(MenubarModel.ApplyTheme(profile, theme))
+        profile.opacity, profile.textColor[4] = 0, 0.65
         Menubar:Rebuild()
         equal(widget.durabilitySummaryIcon, summary)
-        assert(summary:IsVisible())
-        equal(summary:GetEffectiveAlpha(), 1)
-        for index = 1, 4 do equal(summary.vertexColor[index], 1) end
-        equal(widget.width, widget.label:GetStringWidth() + 27)
+        assert(summary:IsVisible()); equal(summary:GetEffectiveAlpha(), 1)
+        equal(widget.label:GetText(), "100%")
+        local light = lightThemes[theme]
+        equal(widget.label.fontFlags, light and "" or "OUTLINE"); equal(widget.label.font, profile.font)
+        for component = 1, 3 do equal(widget.label.textColor[component], light and 0 or 1) end
+        equal(summary.vertexColor[4], 0.65)
+        equal(widget.label.textColor[4], 0.65)
         equal(Menubar.bars.top.surface:GetAlpha(), 0)
     end
-    local setter = summary.SetAtlas
-    summary.SetAtlas = function() error("temporary repair icon failure", 0) end
-    Menubar:RefreshWidget(widget.id); Menubar:Layout()
-    assert(widget.failed and widget.failed:find("temporary repair icon failure", 1, true))
-    assert(not summary:IsShown()); equal(widget.label.points[1][1], "CENTER")
-    assert(widget.label:GetText():find("error", 1, true))
-    summary.SetAtlas = setter
-    Menubar:RefreshWidget(widget.id); Menubar:Layout()
-    assert(not widget.failed and summary:IsVisible())
-    equal(widget.durabilitySummaryIcon, summary); equal(#Stub.textures, textures)
-    equal(widget.label:GetText(), "100%")
+end)
+
+check("custom Aqua foreground tints the hammer and unknown surfaces use the chosen ink as a contrast cue", function()
+    local profile = Menubar:GetProfile()
+    assert(MenubarModel.ApplyTheme(profile, "macosx"))
+    local ink = { 0.12, 0.20, 0.32, 0.8 }
+    profile.textColor, profile.opacity = ink, 1
+    Menubar:Rebuild()
+    for component = 1, 4 do
+        equal(widget.label.textColor[component], ink[component])
+        equal(widget.durabilitySummaryIcon.vertexColor[component], ink[component])
+    end
+    profile.texture = "solid"
+    profile.background = { 0.08, 0.10, 0.12, 1 }
+    Menubar:Rebuild()
+    equal(widget.label.fontFlags, "OUTLINE")
+    equal(widget.label.textColor[1], 1)
+    profile.texture = "MyTexture"
+    Menubar:Rebuild()
+    equal(widget.label.fontFlags, "")
+    profile.textColor = { 0.9, 0.9, 0.9, 0.8 }
+    Menubar:Rebuild()
+    equal(widget.label.fontFlags, "OUTLINE")
+    equal(widget.durabilitySummaryIcon.vertexColor[1], 0.9)
 end)
 
 local function settingControl(caption)

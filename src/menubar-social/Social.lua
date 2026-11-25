@@ -368,14 +368,20 @@ local function render(widget)
         icon:SetPoint("LEFT", (widget.content or widget.frame), "LEFT", 3, 0)
         widget.socialIconReady = true
     end
-    local atlas = notificationAtlas()
-    local accepted, result = false, nil
-    if type(icon.SetAtlas) == "function" then accepted, result = pcall(icon.SetAtlas, icon, atlas) end
-    accepted = accepted and public(result) and result ~= false
-    if accepted and type(icon.GetAtlas) == "function" then
-        local actual = call(icon.GetAtlas, icon)
-        -- Native atlas readback may use canonical capitalization.
-        accepted = type(actual) == "string" and actual:lower() == atlas:lower()
+    local atlas, notification = notificationAtlas()
+    local glyph = "social"
+    if notification then
+        glyph = atlas == "quickjoin-button-group-up" and "social-group" or "social-alert"
+    end
+    local accepted = Menubar.ApplyThemeIcon and Menubar:ApplyThemeIcon(icon, glyph, widget.label)
+    if not Menubar.ApplyThemeIcon and type(icon.SetAtlas) == "function" then
+        local ok, result = pcall(icon.SetAtlas, icon, atlas)
+        accepted = ok and public(result) and result ~= false
+        if accepted and type(icon.GetAtlas) == "function" then
+            local actual = call(icon.GetAtlas, icon)
+            -- Native atlas readback may use canonical capitalization.
+            accepted = type(actual) == "string" and actual:lower() == atlas:lower()
+        end
     end
     if accepted then icon:Show()
     else icon:Hide(); if value == "" or not widget.settings.showLabel then value = "Social" .. (value ~= "" and (" " .. value) or "") end end

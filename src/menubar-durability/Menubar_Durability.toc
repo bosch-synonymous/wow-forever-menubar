@@ -4,7 +4,7 @@
 ## Author: bosch-synonymous
 ## X-License: MIT
 ## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
-## Version: 0.1.10
+## Version: 0.2.1
 ## Dependencies: Menubar
 
 Durability.lua

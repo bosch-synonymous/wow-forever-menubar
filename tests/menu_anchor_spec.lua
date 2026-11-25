@@ -220,6 +220,26 @@ check("quick selectors use their effective top or bottom bar and retain Shift-cl
     end
 end)
 
+check("Mac menu materials including their shadows fit between both bars", function()
+    local f = fixture({ placement = "both", height = 220, art = { left = 0, right = 0, top = 0, bottom = 0 } })
+    local native = MenuVariants.GetDefaultContextMenuMixin()
+    native.Generate = function() end
+    native.GetChildExtentPadding = function() return { width = 0, height = 0 } end
+    for _, theme in ipairs({ "system7", "macos8", "macosx", "macos27" }) do
+        assert(MenubarModel.ApplyTheme(f.host:GetProfile(), theme))
+        f.host:GetProfile().placement = "both"
+        for _, side in ipairs({ "top", "bottom" }) do
+            f.widget.instance.bar = side
+            f.host:Rebuild()
+            local record = f:click(f.widget.frame)
+            f:side(record, side)
+            f:bounds(record, 180, 1000)
+            local nested = f:click(f.widget.frame, true)
+            f:bounds(nested, 190, 1000, f.Stub.MenuItem(nested.description, "Alignment"))
+        end
+    end
+end)
+
 check("core and overflow menus stay outside each bar while empty-space clicks open nothing", function()
     local f = fixture({ placement = "both" })
     for _, side in ipairs({ "top", "bottom" }) do
