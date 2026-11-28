@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.16 — Preview
+
+- Location recognises Duskwood and other contested outdoor zones when the game omits their live PvP classification.
+
+## 0.12.15 — Preview
+
+- Location shows Stranglethorn Vale as contested when the game omits its live territory classification.
+
 ## 0.12.14 — Preview
 
 - Location keeps the zone name and neighbouring widgets in place as coordinates change, including with proportional fonts.

@@ -141,7 +141,7 @@ local function zoneAtPosition(continentID, data)
     return canonical
 end
 
-local function clientOwnership(instance)
+local function regionalTerritory(instance)
     local data = _G.MenubarLocationTerritories
     if type(data) ~= "table" then return nil, "data-unavailable" end
     if type(C_Map) ~= "table" then return nil, "map-api-unavailable" end
@@ -173,8 +173,7 @@ local function clientOwnership(instance)
     -- can instead surround a differently named cave, with its identity checked above.
     if type(name) ~= "string" or name == "" or info.name ~= name then return nil, "area-name" end
     if not spatial and textFrom(GetRealZoneText) ~= name then return nil, "zone-name" end
-    if entry.owner == "Horde" or entry.owner == "Alliance" then return entry.owner end
-    return nil, "unverified-owner"
+    return entry
 end
 
 local function territory(instance)
@@ -208,13 +207,21 @@ local function territory(instance)
     if not result.faction and not result.factionRestricted and result.subzonePvP ~= true and not result.subzonePvPRestricted then
         local player = playerFaction()
         if player then
-            local owner, reason = clientOwnership(instance)
+            local region, reason = regionalTerritory(instance)
             result.fallbackReason = reason
-            if owner then
-                result.state = owner == player and territories.friendly or territories.hostile
-                local localized = _G["FACTION_" .. string.upper(owner)]
-                result.faction = readable(localized) and type(localized) == "string" and localized ~= "" and localized or owner
-                result.source = "clientData"
+            if region then
+                local owner = region.owner
+                if owner == "Horde" or owner == "Alliance" then
+                    result.state = owner == player and territories.friendly or territories.hostile
+                    local localized = _G["FACTION_" .. string.upper(owner)]
+                    result.faction = readable(localized) and type(localized) == "string" and localized ~= "" and localized or owner
+                    result.source = "clientData"
+                elseif region.classification == "contested" then
+                    result.state = territories.contested
+                    result.source = "regionalData"
+                else
+                    result.fallbackReason = "unverified-territory"
+                end
             end
         else
             result.fallbackReason = "player-faction-unavailable"

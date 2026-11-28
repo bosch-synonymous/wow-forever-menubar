@@ -5,7 +5,7 @@
 ## X-License: MIT
 ## IconTexture: Interface\AddOns\Menubar\Media\Menubar.tga
 ## AddonCompartmentFunc: Menubar_OnAddonCompartmentClick
-## Version: 0.12.14
+## Version: 0.12.16
 ## SavedVariables: MenubarDB
 
 Model.lua

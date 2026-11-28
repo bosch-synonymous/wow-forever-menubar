@@ -380,7 +380,8 @@ local function staticTerritoryCase(callback)
         "SetCVar", "C_CVar", "GetInstanceInfo", "C_Minimap" }
     local saved, oldZone, oldSubzone = {}, zone, subzone
     for _, name in ipairs(globals) do saved[name] = _G[name] end
-    local state = { mapID = 1413, infoMapID = 1413, mapType = 3, mapName = "The Barrens", areaName = "The Barrens",
+    local state = { mapID = 1413, infoMapID = 1413, parentMapID = 1414, areaID = 17, mapType = 3,
+        mapName = "The Barrens", areaName = "The Barrens",
         version = "1.60.1", build = "71037", interface = 16001, inInstance = false, freeForAll = false,
         player = "Horde", localizedPlayer = "Horde", lookups = 0, writes = 0, metadataReads = 0 }
     local function forbiddenWrite() state.writes = state.writes + 1; error("Location must not alter map selection or CVars") end
@@ -398,10 +399,10 @@ local function staticTerritoryCase(callback)
         GetBestMapForUnit = function(unit) equal(unit, "player"); return state.mapID end,
         GetMapInfo = function(id)
             equal(id, state.mapID)
-            return { mapID = state.infoMapID, mapType = state.mapType, name = state.mapName, parentMapID = 1414, flags = 0 }
+            return { mapID = state.infoMapID, mapType = state.mapType, name = state.mapName, parentMapID = state.parentMapID, flags = 0 }
         end,
         GetAreaInfo = function(id)
-            assert(id == 17 or id == 12, "Fixture expects a canonical Barrens or Elwynn area lookup")
+            equal(id, state.areaID)
             state.lookups = state.lookups + 1
             return state.areaName
         end,
@@ -436,6 +437,80 @@ test("verified Barrens ownership works with an empty modern query and no legacy 
             equal(render({ showCoordinates = false, colorStatus = false }), "The Barrens [Enemy]")
             state.player, state.localizedPlayer = "Horde", "Horde"
         end
+    end)
+end)
+
+local function capeTerritoryCase(callback)
+    staticTerritoryCase(function(state)
+        zone, subzone = "Stranglethorn Vale", "The Cape of Stranglethorn"
+        state.mapID, state.infoMapID, state.parentMapID, state.areaID = 1434, 1434, 1415, 33
+        state.mapName, state.areaName = zone, zone
+        callback(state)
+    end)
+end
+
+test("the Cape displays contested territory without a faction when live PvP returns no values", function()
+    capeTerritoryCase(function(state)
+        for _, faction in ipairs({ "Horde", "Alliance" }) do
+            state.player, state.localizedPlayer = faction, faction
+            local shown, widget = render({ showCoordinates = false, colorStatus = false })
+            equal(shown, "Stranglethorn Vale [Contested]")
+            local rows = tipFor(widget).rows
+            equal(rows.Subzone, "The Cape of Stranglethorn")
+            equal(rows.Territory, "Contested")
+            equal(rows["Territory faction"], nil)
+        end
+    end)
+end)
+
+test("Stranglethorn's regional classification yields to live PvP and requires a verified location", function()
+    capeTerritoryCase(function(state)
+        local options = { showCoordinates = false, colorStatus = false }
+        for _, sample in ipairs({ { "arena", "Free-for-all" }, { "sanctuary", "Sanctuary" } }) do
+            C_PvP.GetZonePVPInfo = function() return sample[1] end
+            equal(render(options), "Stranglethorn Vale [" .. sample[2] .. "]")
+        end
+        C_PvP.GetZonePVPInfo = function() end
+        state.freeForAll = true
+        equal(render(options), "Stranglethorn Vale [Unknown]")
+        equal(state.lookups, 0)
+        state.freeForAll, state.areaName = false, "Different area"
+        equal(render(options), "Stranglethorn Vale [Unknown]")
+        state.areaName, state.mapID, state.infoMapID = zone, 9999, 9999
+        equal(render(options), "Stranglethorn Vale [Unknown]")
+    end)
+end)
+
+test("zone changes use Duskwood and Ashenvale territory data until a live classification is available", function()
+    staticTerritoryCase(function(state)
+        local _, widget = render({ colorStatus = false })
+        equal(tipFor(widget).rows["Territory faction"], "Horde")
+
+        zone, subzone = "Duskwood", ""
+        state.mapID, state.infoMapID, state.parentMapID, state.areaID = 1431, 1431, 1415, 10
+        state.mapName, state.areaName = zone, zone
+        C_Map.GetPlayerMapPosition = function(id, unit)
+            equal(id, state.mapID); equal(unit, "player")
+            return { GetXY = function() return 0.450, 0.827 end }
+        end
+        provider.update(widget)
+        equal(widget.text, "Duskwood (45.0, 82.7) [Contested]")
+        local rows = tipFor(widget).rows
+        equal(rows.Territory, "Contested")
+        equal(rows["Territory faction"], nil)
+
+        zone = "Orneval" -- Localized Ashenvale map, area and zone names.
+        state.mapID, state.infoMapID, state.parentMapID, state.areaID = 1440, 1440, 1414, 331
+        state.mapName, state.areaName = zone, zone
+        state.player, state.localizedPlayer = "Alliance", "Alliance"
+        widget.settings.showCoordinates = false
+        C_PvP.GetZonePVPInfo = function() return "friendly", false, "Alliance" end
+        provider.update(widget)
+        equal(widget.text, "Orneval [Friendly]")
+        C_PvP.GetZonePVPInfo = function() end
+        provider.update(widget)
+        equal(widget.text, "Orneval [Contested]")
+        equal(tipFor(widget).rows["Territory faction"], nil)
     end)
 end)
 
@@ -474,7 +549,7 @@ test("verified world territory data uses map and localized area identity rather 
         zone, subzone, state.mapName, state.areaName = "Das Brachland", "Das Wegekreuz", "Das Brachland", "Das Brachland"
         equal(render({ showCoordinates = false, colorStatus = false }), "Das Brachland [Friendly]")
         zone, subzone, state.mapName, state.areaName = "Elwynn Forest", "Goldshire", "Elwynn Forest", "Elwynn Forest"
-        state.mapID, state.infoMapID = 1429, 1429
+        state.mapID, state.infoMapID, state.parentMapID, state.areaID = 1429, 1429, 1415, 12
         equal(render({ showCoordinates = false, colorStatus = false }), "Elwynn Forest [Enemy]")
         state.player, state.localizedPlayer = "Alliance", "Alliance"
         equal(render({ showCoordinates = false, colorStatus = false }), "Elwynn Forest [Friendly]")

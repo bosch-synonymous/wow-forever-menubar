@@ -2,7 +2,7 @@
 
 local Model, Layout = MenubarModel, MenubarLayout
 
-local Menubar = { NativeStatusBars = MenubarNativeStatusBars, API_VERSION = 1, VERSION = "0.12.14", CAPABILITIES = {
+local Menubar = { NativeStatusBars = MenubarNativeStatusBars, API_VERSION = 1, VERSION = "0.12.16", CAPABILITIES = {
     directClick = true, guardedCallbacks = true, retainedContexts = true, eventOnly = true,
 }, types = {}, runtime = {}, dormant = {}, bars = {} }
 
